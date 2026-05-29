@@ -6,51 +6,238 @@ topics: ["nginx", "error"]
 published: true
 ---
 
-> **Nginx** を使っているときに **503** というエラーが出た場合、このページで解決できます。難しい知識は不要です。上から順に確認していきましょう。
+## エラーの概要
 
----
+Nginx の 503 Service Unavailable エラーは、Nginx がリクエストを処理するバックエンドサーバー（アプリケーションサーバー等）に接続できないか、バックエンドが全て利用不可能な状態を示します。クライアントが発した正当なリクエストであっても、サーバー側の問題によって処理できないため、Nginx がこのエラーを返します。このエラーは一時的な問題である場合が多く、バックエンド側の復旧やNginx設定の修正で解決することがほとんどです。
 
-## まずこれだけ試してください
+## 実際のエラーメッセージ例
 
-難しいことを調べる前に、次の3つを確認してください。多くの場合、これだけで解決します。
+ブラウザで表示される場合：
 
-1. **一度ログアウトして、再度ログインする**
-2. **ブラウザのキャッシュ・Cookieをクリアして再試行する**
-3. **しばらく待ってから（5〜10分後）再試行する**
+```
+503 Service Unavailable
+Service Unavailable
 
----
+The server is temporarily unable to service your request due to maintenance downtime or capacity problems. Please try again later.
+```
 
-## このエラーの意味
+Nginxのエラーログに出力される場合：
 
-**503** は、Nginx が「Nginxのバックエンドが過負荷またはメンテナンス中でリクエストを処理できない。」という状態のときに表示されます。
+```
+2024/01/15 14:32:01 [error] 12345#12345: *1 connect() failed (111: Connection refused) while connecting to upstream, client: 192.168.1.100, server: example.com, request: "GET / HTTP/1.1", upstream: "http://127.0.0.1:8080/", host: "example.com"
+```
 
-エラーが出ても、データが消えたり壊れたりするわけではないので安心してください。
+## よくある原因と解決手順
 
----
+### 原因1：バックエンドサーバーがダウンしている
 
-## よくある原因
+バックエンドの全てのサーバーがダウンしているか、起動していない状態です。Nginx設定の upstream ブロックで指定したサーバーへの接続がタイムアウトまたは拒否されます。
 
-このエラーが出るときによく見られるパターンです。自分の状況に近いものを探してみてください。
+**Before（エラーが起きる状態）：**
 
-- upstream内のすべてのバックエンドサーバーがダウンしている
-- バックエンドの最大接続数（max_conns）に達している
-- Nginxのメンテナンスモードが有効になっている
+```nginx
+upstream app_backend {
+    server 127.0.0.1:8080;
+    server 127.0.0.1:8081;
+}
 
----
+server {
+    listen 80;
+    server_name example.com;
+    
+    location / {
+        proxy_pass http://app_backend;
+    }
+}
+```
 
-## 解決手順（上から順に試す）
+この設定で 8080 と 8081 のポートが起動していない場合、503 エラーが返されます。
 
-1. upstream内の各バックエンドサーバーの状態を確認する
-1. max_conns値を増やすかバックエンドサーバーをスケールアップする
-1. エラーページのreturn 503をreturn 200に変更してメンテナンスモードを解除する
+**確認と解決方法：**
 
----
+```bash
+# バックエンドサーバーが起動しているか確認
+ps aux | grep -E '8080|8081'
+
+# ポートがリッスン中か確認
+netstat -tlnp | grep -E '8080|8081'
+# または
+ss -tlnp | grep -E '8080|8081'
+
+# バックエンドサーバーが起動していなければ起動する
+# 例：Node.js の場合
+cd /path/to/app && node server.js &
+
+# または Docker コンテナの場合
+docker run -d -p 8080:8080 my-app:latest
+```
+
+**After（修正例）：**
+
+バックエンドサーバーを起動した後、Nginxにバックエンドの再読み込みが必要な場合があります。
+
+```bash
+# Nginxの設定を確認してリロード
+nginx -t && nginx -s reload
+```
+
+### 原因2：max_conns で接続数制限に達している
+
+upstream ブロックで `max_conns` パラメータを設定している場合、同時接続数の上限に達するとバックエンドへ接続できず 503 が返されます。
+
+**Before（接続数制限による 503）：**
+
+```nginx
+upstream app_backend {
+    server 127.0.0.1:8080 max_conns=10;
+    server 127.0.0.1:8081 max_conns=10;
+}
+```
+
+10 個以上の同時リクエストがある場合、11番目以降のリクエストは 503 エラーを受け取ります。
+
+**After（制限値を増やす）：**
+
+```nginx
+upstream app_backend {
+    server 127.0.0.1:8080 max_conns=100;
+    server 127.0.0.1:8081 max_conns=100;
+}
+```
+
+変更後の確認：
+
+```bash
+# 設定をテストして反映
+nginx -t && nginx -s reload
+
+# 現在の接続状況をモニタリング
+tail -f /var/log/nginx/error.log | grep 'upstream'
+```
+
+### 原因3：proxy_connect_timeout が短すぎる
+
+バックエンドへの接続タイムアウト時間が設定値より短い場合、接続確立前にタイムアウトして 503 が返されます。特にレイテンシの高い環境では問題になります。
+
+**Before（タイムアウト時間が短すぎる）：**
+
+```nginx
+location / {
+    proxy_pass http://app_backend;
+    proxy_connect_timeout 1s;
+    proxy_send_timeout 1s;
+    proxy_read_timeout 1s;
+}
+```
+
+1秒でタイムアウトする設定では、応答の遅いバックエンドに対して 503 が返されます。
+
+**After（タイムアウト時間を延長）：**
+
+```nginx
+location / {
+    proxy_pass http://app_backend;
+    proxy_connect_timeout 10s;
+    proxy_send_timeout 30s;
+    proxy_read_timeout 30s;
+}
+```
+
+変更を反映：
+
+```bash
+nginx -t && nginx -s reload
+```
+
+## Nginx固有の注意点
+
+### ヘルスチェック設定の確認
+
+Nginx Plus では `health_check` を使用してバックエンドのヘルスチェックを実施しますが、Nginx オープンソース版ではこの機能がないため、手動でバックエンド監視を行う必要があります。
+
+```nginx
+# Nginx Plus の場合
+upstream app_backend {
+    server 127.0.0.1:8080;
+    server 127.0.0.1:8081;
+    
+    health_check interval=3s falls=3 rises=2;
+}
+```
+
+オープンソース版では、systemd や外部監視ツールでバックエンドプロセスを監視してください。
+
+### backup パラメータの活用
+
+メインのバックエンドがダウンしている場合、backup サーバーにリクエストをルーティングすることで 503 を回避できます。
+
+```nginx
+upstream app_backend {
+    server 127.0.0.1:8080;
+    server 127.0.0.1:8081 backup;
+}
+```
+
+### keepalive 接続の不具合
+
+バックエンドへの keepalive 接続が失敗する場合、接続プールの設定を見直してください。
+
+```nginx
+upstream app_backend {
+    server 127.0.0.1:8080;
+    keepalive 32;
+}
+
+location / {
+    proxy_pass http://app_backend;
+    proxy_http_version 1.1;
+    proxy_set_header Connection "";
+}
+```
 
 ## それでも解決しない場合
 
-- **Nginx のサポートに問い合わせる**：エラーメッセージの全文をスクリーンショットで送ると対応が早くなります
-- **公式ヘルプページを検索する**：「503 Nginx」で検索すると関連ページが見つかることがあります
-- **時間をおいて再試行する**：Nginx 側で一時的な問題が起きているケースもあります
+### ログを詳しく確認する
+
+```bash
+# Nginx エラーログを確認
+tail -100 /var/log/nginx/error.log
+
+# アクセスログで 503 が記録されているか確認
+tail -100 /var/log/nginx/access.log | grep '503'
+
+# ログレベルを debug に上げて再度テスト
+# nginx.conf 内で：
+# error_log /var/log/nginx/error.log debug;
+```
+
+### バックエンドサーバーのログを確認
+
+```bash
+# アプリケーションサーバーのログを確認
+# Node.js の場合
+tail -f /var/log/app/server.log
+
+# Docker コンテナの場合
+docker logs -f <container-id>
+
+# システムリソースを確認
+top
+free -h
+df -h
+```
+
+### Nginx の詳細な接続状態を確認
+
+```bash
+# アクティブな接続を確認
+netstat -tnap | grep ESTABLISHED | wc -l
+
+# バックエンドへの接続試行を追跡
+tcpdump -i lo -n 'tcp port 8080 or tcp port 8081'
+```
+
+公式ドキュメントの「[Module ngx_http_upstream_module](http://nginx.org/en/docs/http/ngx_http_upstream_module.html)」では upstream ブロックの全パラメータが詳しく解説されています。また「[Troubleshooting](http://nginx.org/en/docs/faq/variables_in_config.html)」も参考になります。
 
 ---
 
