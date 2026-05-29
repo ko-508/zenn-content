@@ -6,56 +6,184 @@ topics: ["openai-api", "error"]
 published: true
 ---
 
-> この記事では、**OpenAI API** を使っているときに表示される **400** というエラーの意味と、その直し方を順を追って説明します。
+## エラーの概要
+
+OpenAI APIで400エラーが返される場合、リクエストの形式または内容に問題があることを示します。これは「Bad Request」と呼ばれ、サーバー側の問題ではなく、クライアント（あなたのコード）から送信されたリクエストが仕様に合致していないことを意味しています。OpenAI APIでは、リクエストボディのJSON形式の誤りや必須パラメータの欠落、不正なフィールド値などが主な原因です。
+
+## 実際のエラーメッセージ例
+
+```json
+{
+  "error": {
+    "message": "Invalid request body",
+    "type": "invalid_request_error",
+    "param": null,
+    "code": "invalid_request_error"
+  }
+}
+```
+
+```json
+{
+  "error": {
+    "message": "This model_version does not exist",
+    "type": "invalid_request_error",
+    "param": "model",
+    "code": "invalid_request_error"
+  }
+}
+```
+
+## よくある原因と解決手順
+
+### 原因1：JSONの構文エラーまたはフィールド名の誤字
+
+リクエストボディのJSONが不正な形式になっていたり、OpenAI APIが定義していないフィールド名を使用したりすると400エラーが発生します。
+
+**Before（エラーが起きるコード）**
+```python
+import openai
+
+openai.api_key = "<your-api-key>"
+
+response = openai.ChatCompletion.create(
+    model="gpt-4",
+    mesages=[  # ← typo: "mesages" は誤字
+        {"role": "user", "content": "Hello"}
+    ]
+)
+```
+
+**After（修正後）**
+```python
+import openai
+
+openai.api_key = "<your-api-key>"
+
+response = openai.ChatCompletion.create(
+    model="gpt-4",
+    messages=[  # ← 正しいフィールド名
+        {"role": "user", "content": "Hello"}
+    ]
+)
+```
+
+### 原因2：サポートされていないモデル名の指定
+
+存在しないモデルIDや、サポートが終了したモデルを指定すると400エラーが発生します。
+
+**Before（エラーが起きるコード）**
+```bash
+curl https://api.openai.com/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <your-api-key>" \
+  -d '{
+    "model": "gpt-4-turbo",
+    "messages": [{"role": "user", "content": "Hi"}]
+  }'
+```
+
+**After（修正後）**
+```bash
+curl https://api.openai.com/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <your-api-key>" \
+  -d '{
+    "model": "gpt-4-turbo-preview",
+    "messages": [{"role": "user", "content": "Hi"}]
+  }'
+```
+
+### 原因3：temperature、top_p、max_tokensなどのパラメータが範囲外
+
+これらのパラメータは値の範囲が定められており、範囲外の値を指定すると400エラーになります。
+
+**Before（エラーが起きるコード）**
+```javascript
+const response = await fetch('https://api.openai.com/v1/chat/completions', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer <your-api-key>`
+  },
+  body: JSON.stringify({
+    model: 'gpt-4',
+    messages: [{role: 'user', content: 'test'}],
+    temperature: 2.5  // ← 範囲外（0～2.0）
+  })
+});
+```
+
+**After（修正後）**
+```javascript
+const response = await fetch('https://api.openai.com/v1/chat/completions', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer <your-api-key>`
+  },
+  body: JSON.stringify({
+    model: 'gpt-4',
+    messages: [{role: 'user', content: 'test'}],
+    temperature: 1.5  // ← 正しい範囲内
+  })
+});
+```
+
+### 原因4：messagesパラメータが空または不正な構造
+
+messagesは配列で、各要素は必ず「role」と「content」フィールドを持つ必要があります。
+
+**Before（エラーが起きるコード）**
+```python
+response = openai.ChatCompletion.create(
+    model="gpt-4",
+    messages=[
+        {"role": "user"}  # ← "content" フィールドが欠落
+    ]
+)
+```
+
+**After（修正後）**
+```python
+response = openai.ChatCompletion.create(
+    model="gpt-4",
+    messages=[
+        {"role": "user", "content": "What is the capital of France?"}
+    ]
+)
+```
+
+## OpenAI API固有の注意点
+
+OpenAI APIで400エラーが出る場合、以下のポイントを確認してください。
+
+**APIキーのフォーマット**：APIキーがちゃんと環境変数から読み込まれているか、文字列の前後に余計なスペースが含まれていないか確認してください。
+
+**リクエストヘッダーの指定**：`Content-Type: application/json`と`Authorization: Bearer <api-key>`の2つのヘッダーは必須です。オフィシャルのOpenAI Pythonライブラリを使っている場合は自動で設定されますが、curlやNode.jsで直接APIを呼び出すときは明示的に指定する必要があります。
+
+**新しいモデルの確認**：OpenAI APIは頻繁に新しいモデルが追加され、古いモデルはサポートが終了します。`gpt-3.5-turbo`や`gpt-4-turbo-preview`など、常に最新の有効なモデルIDを使用してください。
+
+**streaming パラメータの指定時**：`stream: true`を指定した場合、レスポンスの形式が異なります。ストリーミングレスポンスを正しく処理していない場合も400が発生することがあります。
+
+## それでも解決しない場合
+
+OpenAI APIの公式ドキュメント「[Error codes and types](https://platform.openai.com/docs/guides/error-handling/error-codes)」で、より詳細なエラーコードと対応方法を確認できます。
+
+また、curlで直接APIを叩いてみることで、問題がクライアントライブラリの設定なのか、リクエスト自体の問題なのかを特定できます。
+
+```bash
+curl -v https://api.openai.com/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <your-api-key>" \
+  -d '{
+    "model": "gpt-4",
+    "messages": [{"role": "user", "content": "test"}]
+  }'
+```
+
+APIレスポンスの`error.param`フィールドに問題のあるパラメータ名が記載されていることが多いため、そこから原因を特定することができます。それでも不明な場合は、OpenAI Communityフォーラムで同様の事例がないか検索するか、最新の[GitHub Issues](https://github.com/openai/openai-python/issues)を確認してください。
 
 ---
 
-## OpenAI API の 400 とは何か？（公式の定義）
-
-**400** は、HTTP標準仕様（RFC 9110）で定められているステータスコードの一つです。
-
-OpenAI API の文脈では、このコードは次のことを意味します。
-
-> OpenAI APIへのリクエストの形式または内容に誤りがある。
-
-このエラーが出たときは、慌てずに次の「原因」の節を確認してください。
-多くの場合、設定の見直しや手順の確認だけで解決できます。
-
----
-
-## このエラーが発生する主な原因（起きる理由の整理）
-
-OpenAI API で 400 が出るときに、最もよく見られる原因を挙げます。
-自分の状況に当てはまるものを探してみてください。
-
-- リクエストボディのJSONが壊れているか必須フィールドが欠けている
-- 指定したモデル名が間違っているか存在しない
-- messagesパラメータのroleの値が規定外（"system"/"user"/"assistant"以外）になっている
-
----
-
-## 具体的な解決手順とチェックリスト（順番どおりに試す）
-
-上の原因ごとの対処法を、実行できる手順の形でまとめました。
-**上から順番に試す**ことで、多くの場合は解決に近づけます。
-
-1. APIドキュメントで必須パラメータを確認する
-1. 使用可能なモデル名（gpt-4o・gpt-4o-mini等）をドキュメントで確認する
-1. エラーレスポンスの「error.message」フィールドで問題の詳細を確認する
-
----
-
-## まとめ
-
-OpenAI API の **400** エラーは、上記のいずれかの原因によって発生するケースがほとんどです。
-チェックリストを一つずつ確認することで、大半の問題は自力で解決できます。
-
-それでも解決しない場合は、次の方法を試してください。
-
-- OpenAI API の公式ドキュメントで最新の情報を確認する
-- エラーメッセージの全文をコピーして検索エンジンで調べる
-- 公式のコミュニティフォーラムやサポートに問い合わせる
-
----
-
-*免責事項：本記事の内容は、執筆時点の公開情報をもとに作成したものです。ソフトウェアの仕様やAPIの動作は予告なく変更されることがあります。最新かつ正確な情報については、各ツールの公式ドキュメントを必ずご確認ください。本記事の情報を利用した結果生じたいかなる損害についても、著者および運営者は責任を負いかねます。*
+*免責事項：本記事の内容は、執筆時点の公開情報をもとに作成したものです。ソフトウェアの仕様は予告なく変更されることがあります。最新の情報は各ツールの公式サポートページをご確認ください。本記事の情報を利用した結果生じたいかなる損害についても、著者および運営者は責任を負いかねます。*
