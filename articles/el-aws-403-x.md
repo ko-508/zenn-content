@@ -1,0 +1,249 @@
+---
+title: "AWS の 403 エラー：原因と解決策"
+emoji: "☁️"
+type: "tech"
+topics: ["aws", "error"]
+published: true
+---
+
+## エラーの概要
+
+AWS の 403 エラーは、HTTP ステータスコード 403 Forbidden として返されます。これは認証（ユーザーが本人であることの確認）には成功したものの、実行しようとしている操作に対する IAM（Identity and Access Management）権限が不足していることを意味します。AWS リソースへのアクセス、API 呼び出し、AWS マネジメントコンソール上での操作など、様々な場面で発生する一般的なエラーです。
+
+## 実際のエラーメッセージ例
+
+AWS CLI でよく見かける 403 エラーレスポンスを示します。
+
+```json
+{
+  "Error": {
+    "Code": "AccessDenied",
+    "Message": "User: arn:aws:iam::123456789012:user/john-dev is not authorized to perform: s3:GetObject on resource: arn:aws:s3:::my-bucket/config.json"
+  }
+}
+```
+
+また、AWS マネジメントコンソール上では、より簡潔なエラーが表示されることもあります。
+
+```
+User: arn:aws:iam::123456789012:user/jane-admin is not authorized to perform: ec2:DescribeInstances on resource: *
+```
+
+## よくある原因と解決手順
+
+### 原因 1：IAM ポリシーに必要な Action が含まれていない
+
+IAM ポリシーに、実行したい操作（Action）が明示的に許可されていない場合、403 エラーが発生します。例えば S3 バケットから読み取りはできるが、アップロード（PutObject）が許可されていない状況が典型的です。
+
+**Before（エラーが起きる IAM ポリシー）：**
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject"
+      ],
+      "Resource": "arn:aws:s3:::my-bucket/*"
+    }
+  ]
+}
+```
+
+このポリシーでは GetObject（読み取り）のみが許可されているため、PutObject でアップロードしようとするとアクセス拒否されます。
+
+**After（修正後）：**
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject"
+      ],
+      "Resource": "arn:aws:s3:::my-bucket/*"
+    }
+  ]
+}
+```
+
+### 原因 2：リソースレベルの制限によるアクセス拒否
+
+IAM ポリシー内の Resource フィールドで、特定の ARN（Amazon Resource Name）のみが許可されているため、他のリソースへのアクセスが拒否される場合があります。ワイルドカード（*）の使い方を見直す必要があります。
+
+**Before（特定のバケットのみ許可）：**
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "ec2:DescribeInstances",
+      "Resource": "arn:aws:ec2:ap-northeast-1:123456789012:instance/i-1234567890abcdef0"
+    }
+  ]
+}
+```
+
+このポリシーでは、指定されたインスタンス ID のみへのアクセスが許可されるため、別のインスタンスにアクセスするときに 403 が発生します。
+
+**After（修正後）：**
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "ec2:DescribeInstances",
+      "Resource": "*"
+    }
+  ]
+}
+```
+
+### 原因 3：SCP（サービスコントロールポリシー）による組織全体での制限
+
+AWS Organizations を使用している場合、SCP によって特定の操作やサービスが組織レベルで制限されていることがあります。IAM ポリシーで許可されていても、SCP で拒否されていれば 403 エラーが発生します。
+
+**確認するコマンド（AWS CLI）：**
+
+```bash
+aws organizations list-policies \
+  --filter SERVICE_CONTROL_POLICY \
+  --region us-east-1
+```
+
+SCP を確認した後、必要に応じて組織管理アカウントで SCP を調整します。
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Deny",
+      "Action": "s3:*",
+      "Resource": "*"
+    }
+  ]
+}
+```
+
+このような SCP があると、IAM ユーザーがどのような権限を持っていても S3 へのすべてのアクセスが拒否されます。
+
+### 原因 4：一時的なセッショントークンの有効期限切れ
+
+AssumeRole を使用して一時的なクレデンシャルを取得している場合、セッショントークン（SessionToken）の有効期限が切れると 403 エラーが発生することがあります。
+
+**Before（期限切れトークンを使用）：**
+
+```bash
+export AWS_ACCESS_KEY_ID="ASIAZZZZZZZZZZZZZZ"
+export AWS_SECRET_ACCESS_KEY="<secret>"
+export AWS_SESSION_TOKEN="<expired-token>"
+aws s3 ls s3://my-bucket
+```
+
+**After（新しいトークンを取得）：**
+
+```bash
+aws sts assume-role \
+  --role-arn arn:aws:iam::123456789012:role/my-role \
+  --role-session-name my-session \
+  --duration-seconds 3600
+```
+
+出力されたクレデンシャルを環境変数に設定してから実行します。
+
+### 原因 5：リソースベースのポリシーによるクロスアカウントアクセス拒否
+
+S3 バケットや KMS キーなど、リソースベースのポリシー（Resource-based Policy）で特定のアカウントやロールからのアクセスが明示的に拒否されている場合があります。
+
+**確認コマンド（S3 バケットポリシーの場合）：**
+
+```bash
+aws s3api get-bucket-policy \
+  --bucket my-bucket \
+  --region ap-northeast-1
+```
+
+リソースベースのポリシーに、ユーザーの ARN が Allow されていることを確認してください。
+
+## ツール固有の注意点
+
+### AWS サービスごとの 403 原因の違い
+
+**S3 の 403 エラー：**
+S3 へのアクセスが拒否される場合は、バケットポリシー、IAM ポリシー、ACL（Access Control List）、そして ブロックパブリックアクセス設定の 4 層すべてを確認する必要があります。以下の順序で確認してください。
+
+```bash
+# バケットポリシーの確認
+aws s3api get-bucket-policy --bucket <your-bucket>
+
+# ブロックパブリックアクセス設定の確認
+aws s3api get-public-access-block --bucket <your-bucket>
+
+# ACL の確認
+aws s3api get-bucket-acl --bucket <your-bucket>
+```
+
+**IAM ロール使用時の 403 エラー：**
+EC2 インスタンスや Lambda 関数で IAM ロールを使用している場合、ロールの信頼ポリシー（Trust Relationship）が正しく設定されているか確認してください。信頼ポリシーが不適切だと、ロール自体を AssumeRole できず 403 が発生します。
+
+```bash
+aws iam get-role \
+  --role-name <your-role-name> \
+  --query 'Role.AssumeRolePolicyDocument'
+```
+
+**API Gateway / CloudFront を経由したアクセスの 403：**
+API Gateway のリソースポリシーや CloudFront のオリジンアクセスコントロール（OAC）で制限されている場合も 403 が返されます。特に CloudFront 経由で S3 にアクセスする場合は、OAC の設定漏れがよくある原因です。
+
+**KMS キーへのアクセス拒否：**
+S3 のサーバーサイド暗号化（SSE-KMS）を使用する場合、KMS キーの操作権限が別途必要です。IAM ポリシーで `kms:Decrypt` および `kms:GenerateDataKey` が許可されていることを確認してください。
+
+```json
+{
+  "Effect": "Allow",
+  "Action": [
+    "kms:Decrypt",
+    "kms:GenerateDataKey"
+  ],
+  "Resource": "arn:aws:kms:ap-northeast-1:123456789012:key/<key-id>"
+}
+```
+
+## それでも解決しない場合
+
+### ログとデバッグ方法
+
+AWS CloudTrail を有効にすることで、403 エラーが発生した時点での詳細情報を確認できます。
+
+```bash
+aws cloudtrail lookup-events \
+  --lookup-attributes AttributeKey=EventName,AttributeValue=GetObject \
+  --max-items 10 \
+  --region ap-northeast-1
+```
+
+CloudTrail ログには、拒否の理由が詳細に記録されているため、「どのステートメントで拒否されたのか」が明確になります。
+
+IAM ポリシーシミュレーターも有効なツールです。AWS マネジメントコンソールから IAM → ポリシーシミュレーター へアクセスし、特定のユーザーが特定のアクションを実行できるか事前テストできます。
+
+### 公式ドキュメント
+
+AWS 公式ドキュメントの「IAM トラブルシューティング」ページに、403 エラーの詳細な診断フローが記載されています。また「IAM ポリシーの例」では、各サービスごとの推奨ポリシーテンプレートが提供されています。
+
+### コミュニティリソース
+
+GitHub の AWS CDK や Terraform コミュニティでも、同様の 403 エラー事例が共有されています。「403 AccessDenied」で検索すると、実際の環境での解決例が見つかることが多くあります。
+
+---
+
+*免責事項：本記事の内容は、執筆時点の公開情報をもとに作成したものです。ソフトウェアの仕様は予告なく変更されることがあります。最新の情報は各ツールの公式サポートページをご確認ください。本記事の情報を利用した結果生じたいかなる損害についても、著者および運営者は責任を負いかねます。*

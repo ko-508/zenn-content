@@ -1,0 +1,257 @@
+---
+title: "AWS の 503 エラー：原因と解決策"
+emoji: "☁️"
+type: "tech"
+topics: ["aws", "error"]
+published: true
+---
+
+## エラーの概要
+
+AWS の 503 Service Unavailable は、リクエストが処理できない一時的なサービス障害を示すステータスコードです。AWS のサービス側に処理能力の不足、障害、またはバックエンド側の問題があることを意味します。このエラーは通常一時的であり、リトライ戦略により解決することが多いですが、設定ミスが原因になることもあります。
+
+## 実際のエラーメッセージ例
+
+**API Gateway / ALB を経由する場合**
+
+```json
+{
+  "message": "Service Unavailable"
+}
+```
+
+**CloudWatch ログで確認される例**
+
+```
+[ERROR] 503 Service Unavailable - Target: backend-instance-1 is unhealthy
+[ERROR] ApplicationLoadBalancer rejected request: All targets are unavailable
+```
+
+**AWS CLI 実行時の例**
+
+```bash
+An error occurred (ServiceUnavailable) when calling the GetObject operation: 
+Service is unavailable. Please try again later.
+```
+
+## よくある原因と解決手順
+
+### 原因1：EC2 / ECS バックエンドインスタンスがダウンしている
+
+バックエンドが応答しないため、Application Load Balancer（ALB）や Network Load Balancer（NLB）がリクエストを処理できなくなります。ヘルスチェックが失敗すると、すべてのターゲットが unhealthy と判定されます。
+
+**Before（ターゲットグループの設定確認）**
+
+```bash
+# 現在のターゲットの状態を確認
+aws elbv2 describe-target-health \
+  --target-group-arn arn:aws:elasticloadbalancing:ap-northeast-1:123456789012:targetgroup/my-app/abc123def456
+```
+
+```json
+{
+  "TargetHealthDescriptions": [
+    {
+      "Target": {
+        "Id": "i-0123456789abcdef0",
+        "Port": 8080
+      },
+      "TargetHealth": {
+        "State": "unhealthy",
+        "Reason": "Target.ResponseCodeMismatch",
+        "Description": "Health checks failed with these codes: [500]"
+      }
+    }
+  ]
+}
+```
+
+**After（原因の特定と修正）**
+
+```bash
+# EC2 インスタンスにログインして、ウェブサーバーのステータスを確認
+ssh -i <your-key.pem> ec2-user@<your-instance-ip>
+sudo systemctl status nginx
+# または
+sudo systemctl status apache2
+
+# サーバーログを確認
+sudo tail -f /var/log/nginx/error.log
+# または
+sudo tail -f /var/log/httpd/error_log
+
+# ウェブサーバーが停止していれば、再起動
+sudo systemctl restart nginx
+```
+
+ターゲットグループのヘルスチェック設定を確認し、タイムアウトやポート設定が正しいか検証してください。
+
+```bash
+aws elbv2 describe-target-groups \
+  --target-group-arns arn:aws:elasticloadbalancing:ap-northeast-1:123456789012:targetgroup/my-app/abc123def456
+```
+
+### 原因2：API Gateway / Lambda が同時実行数の上限に達している
+
+AWS Lambda の同時実行数（Concurrent Executions）のリザーブドコンカレンシーが設定されている、または予期しないスパイクで上限に達すると、API Gateway経由のリクエストが 503 で返されます。
+
+**Before（現在の Lambda 同時実行数を確認）**
+
+```bash
+aws lambda get-account-settings \
+  --region ap-northeast-1
+```
+
+```json
+{
+  "AccountLimit": {
+    "ConcurrentExecutions": 1000,
+    "UnreservedConcurrentExecutions": 100,
+    "TotalCodeSize": 3221225472
+  },
+  "AccountUsage": {
+    "ConcurrentExecutions": 987,
+    "FunctionCount": 12
+  }
+}
+```
+
+```bash
+# リザーブドコンカレンシーの設定を確認
+aws lambda get-function-concurrency \
+  --function-name <your-function-name>
+```
+
+```json
+{
+  "ReservedConcurrentExecutions": 100
+}
+```
+
+**After（リザーブドコンカレンシーを増加、または削除）**
+
+```bash
+# リザーブドコンカレンシーを 500 に増やす
+aws lambda put-function-concurrency \
+  --function-name <your-function-name> \
+  --reserved-concurrent-executions 500
+
+# リザーブドコンカレンシーを削除する（アカウント全体の上限まで利用可能）
+aws lambda delete-function-concurrency \
+  --function-name <your-function-name>
+```
+
+Lambda のオートスケーリングを設定するか、CloudWatch アラームで同時実行数を監視してください。
+
+### 原因3：RDS / DynamoDB がキャパシティ上限に達している
+
+データベースへのアクセスが集中し、プロビジョニングされたキャパシティ（RDS の接続数、DynamoDB の読み取り/書き込み容量）を超えると、バックエンドが 503 を返します。
+
+**Before（RDS 接続数の確認）**
+
+```bash
+# RDS のパラメータグループから max_connections を確認
+aws rds describe-db-parameters \
+  --db-parameter-group-name <your-parameter-group> \
+  --query 'Parameters[?ParameterName==`max_connections`]'
+```
+
+```json
+[
+  {
+    "ParameterName": "max_connections",
+    "ParameterValue": "100",
+    "Description": "Maximum number of concurrent connections"
+  }
+]
+```
+
+**After（キャパシティの拡張）**
+
+```bash
+# max_connections を増やす
+aws rds modify-db-parameter-group \
+  --db-parameter-group-name <your-parameter-group> \
+  --parameters ParameterName=max_connections,ParameterValue=500,ApplyMethod=immediate
+
+# RDS インスタンスを大きいサイズにスケールアップ
+aws rds modify-db-instance \
+  --db-instance-identifier <your-db-instance> \
+  --db-instance-class db.t3.large \
+  --apply-immediately
+```
+
+DynamoDB の場合、オンデマンド課金モードへの切り替え、またはプロビジョニング容量の増加を検討してください。
+
+```bash
+aws dynamodb update-table \
+  --table-name <your-table> \
+  --billing-mode PAY_PER_REQUEST
+```
+
+## ツール固有の注意点
+
+### Application Load Balancer（ALB）の 503
+
+ALB 経由で 503 が返される場合、以下を確認してください。
+
+- **ターゲットグループのヘルスチェック失敗**：ヘルスチェックパス、プロトコル、ポート番号が正しいか確認。例えば、`/health` エンドポイントが存在しない場合、すべてのターゲットが unhealthy になります。
+- **セキュリティグループの設定**：ALB からバックエンドへのトラフィックが許可されているか確認。インバウンドルールでヘルスチェックポート（例：8080）を ALB のセキュリティグループから許可してください。
+
+### API Gateway + Lambda の 503
+
+API Gateway で 503 が返される主な原因：
+
+- **Lambda 関数のエラー**：Lambda のタイムアウト（デフォルト3秒）、メモリ不足、または実行ロール（IAM Role）の権限不足により、関数が失敗します。CloudWatch ログを確認してください。
+- **統合先サービスの障害**：バックエンド HTTP エンドポイント、DynamoDB、RDS など、Lambda が依存するサービスが応答しないと 503 になります。
+- **API Gateway スロットリング**：ステージレベルのスロットルレート（デフォルト 10,000 RPS）を超えると 429 が返されます。必要に応じて上限引き上げをリクエストしてください。
+
+### Amazon S3 の 503
+
+S3 で 503 が返される場合、以下の対応を取ってください。
+
+- **キーの先頭がランダムでない**：S3 は キープレフィックスで自動シャーディングされます。すべてのリクエストが同じプレフィックス（例：`uploads/2024-01-01-...`）に集中すると、503 が発生します。タイムスタンプをシャッフルするか、ハッシュプレフィックスを追加してください。
+- **AWS Service Health Dashboard を確認**：S3 グローバルサービスの障害が原因の場合、待機が必要です。
+
+## それでも解決しない場合
+
+### 確認すべきログとデバッグコマンド
+
+```bash
+# CloudWatch ログでアプリケーションエラーを確認
+aws logs tail /aws/lambda/<your-function-name> --follow
+
+# ALB のアクセスログを確認
+aws logs tail /aws/alb/<your-load-balancer> --follow
+
+# X-Ray でリクエストのトレースを確認（有効化している場合）
+aws xray get-service-graph \
+  --start-time $(date -d '1 hour ago' +%s) \
+  --end-time $(date +%s)
+
+# リアルタイムメトリクスを CloudWatch で確認
+aws cloudwatch get-metric-statistics \
+  --namespace AWS/ApplicationELB \
+  --metric-name TargetResponseTime \
+  --start-time 2024-01-15T00:00:00Z \
+  --end-time 2024-01-15T01:00:00Z \
+  --period 60 \
+  --statistics Average,Maximum
+```
+
+### 公式ドキュメント
+
+- [AWS Health - Service Health Dashboard](https://status.aws.amazon.com/)
+- [Application Load Balancer トラブルシューティングガイド](https://docs.aws.amazon.com/elasticloadbalancing/latest/application/)
+- [Lambda 関数の最大接続数と同時実行](https://docs.aws.amazon.com/lambda/latest/dg/concurrent-executions.html)
+- [Amazon RDS DB インスタンスの接続数の最適化](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/CHAP_Troubleshooting.html)
+
+### コミュニティリソース
+
+- [AWS Support Center](https://console.aws.amazon.com/support/)：プレミアム サポートプランに加入している場合、技術サポートにケースを開くことができます。
+- [AWS Forums](https://forums.aws.amazon.com/)：他のユーザーの事例を参照。
+- [Stack Overflow の aws-503 タグ](https://stackoverflow.com/questions/tagged/aws-503)
+
+---
+
+*免責事項：本記事の内容は、執筆時点の公開情報をもとに作成したものです。ソフトウェアの仕様は予告なく変更されることがあります。最新の情報は各ツールの公式サポートページをご確認ください。本記事の情報を利用した結果生じたいかなる損害についても、著者および運営者は責任を負いかねます。*

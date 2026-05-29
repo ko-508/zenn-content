@@ -1,0 +1,231 @@
+---
+title: "AWS の 422 エラー：原因と解決策"
+emoji: "☁️"
+type: "tech"
+topics: ["aws", "error"]
+published: true
+---
+
+## エラーの概要
+
+AWS における 422 Unprocessable Entity は、HTTP リクエストの形式は正しいが、含まれるデータが処理不可能または検証に失敗したことを示します。CloudFormation、API Gateway、Lambda、EventBridge、DynamoDB など複数のAWSサービスで発生する可能性があります。このエラーが返されるのは、リクエストの構文は valid だが、ビジネスロジックレベルでの矛盾や制約違反があるためです。
+
+## 実際のエラーメッセージ例
+
+CloudFormation で展開時に発生する 422 エラー:
+
+```json
+{
+  "message": "Template error: instance of Fn::GetAtt references undefined resource",
+  "code": "ValidationError",
+  "statusCode": 422
+}
+```
+
+API Gateway を経由した Lambda 呼び出しでのエラーレスポンス:
+
+```json
+{
+  "message": "Invalid request body: required field 'userId' is missing",
+  "errorType": "UnprocessableEntity",
+  "statusCode": 422
+}
+```
+
+## よくある原因と解決手順
+
+### 原因1: CloudFormation テンプレートのリソース参照ミス
+
+CloudFormation スタックをデプロイする際、テンプレート内で存在しないリソースを参照している場合に 422 が返されます。Fn::GetAtt や Ref を使用してリソース間の依存関係を記述しているとき、参照先のリソース名が誤っていたり、そのリソースが定義されていなかったりすることが原因です。
+
+**Before（エラーが発生する例）:**
+
+```yaml
+Resources:
+  MyLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+
+  MyLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: python3.11
+      Handler: index.handler
+      Role: !GetAtt NonExistentRole.Arn
+      Code:
+        ZipFile: |
+          def handler(event, context):
+            return 'Hello'
+```
+
+**After（修正後）:**
+
+```yaml
+Resources:
+  MyLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+
+  MyLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: python3.11
+      Handler: index.handler
+      Role: !GetAtt MyLambdaRole.Arn
+      Code:
+        ZipFile: |
+          def handler(event, context):
+            return 'Hello'
+```
+
+### 原因2: Lambda ペイロードサイズが上限を超えている
+
+Lambda 関数に送信するペイロードが 6 MB を超える場合、または API Gateway 経由の場合は 10 MB を超える場合に 422 が返されます。リクエストボディが大きすぎる場合、AWS は検証段階で拒否します。
+
+**Before（エラーが発生する例）:**
+
+```python
+import boto3
+import json
+
+lambda_client = boto3.client('lambda')
+
+large_data = 'x' * (7 * 1024 * 1024)
+payload = {
+    'data': large_data,
+    'user_id': '12345'
+}
+
+try:
+    response = lambda_client.invoke(
+        FunctionName='<your-lambda-function-name>',
+        InvocationType='RequestResponse',
+        Payload=json.dumps(payload)
+    )
+except Exception as e:
+    print(f"Error: {e}")
+```
+
+**After（修正後）:**
+
+```python
+import boto3
+import json
+
+lambda_client = boto3.client('lambda')
+s3_client = boto3.client('s3')
+
+large_data = 'x' * (7 * 1024 * 1024)
+
+s3_client.put_object(
+    Bucket='<your-bucket-name>',
+    Key='large-data.txt',
+    Body=large_data
+)
+
+payload = {
+    's3_bucket': '<your-bucket-name>',
+    's3_key': 'large-data.txt',
+    'user_id': '12345'
+}
+
+response = lambda_client.invoke(
+    FunctionName='<your-lambda-function-name>',
+    InvocationType='RequestResponse',
+    Payload=json.dumps(payload)
+)
+```
+
+### 原因3: EventBridge ルールの event pattern が不正な形式
+
+EventBridge にルールを追加する際、イベントパターンの JSON 構文が正しくない、または予約語の使用法が誤っている場合に 422 が発生します。EventBridge はパターンマッチング時に厳密なバリデーションを行うため、スキーマに沿わないパターンは拒否されます。
+
+**Before（エラーが発生する例）:**
+
+```json
+{
+  "Name": "MyRule",
+  "EventBusName": "default",
+  "EventPattern": {
+    "source": ["myapp"],
+    "detail-type": ["order"],
+    "detail": {
+      "status": ["pending", "processing"]
+      "amount": [{ "numeric": [">", 100] }]
+    }
+  },
+  "State": "ENABLED",
+  "Targets": [{
+    "Arn": "arn:aws:lambda:us-east-1:123456789012:function:ProcessOrder",
+    "RoleArn": "arn:aws:iam::123456789012:role/EventBridgeRole"
+  }]
+}
+```
+
+**After（修正後）:**
+
+```json
+{
+  "Name": "MyRule",
+  "EventBusName": "default",
+  "EventPattern": {
+    "source": ["myapp"],
+    "detail-type": ["order"],
+    "detail": {
+      "status": ["pending", "processing"],
+      "amount": [{ "numeric": [">", 100] }]
+    }
+  },
+  "State": "ENABLED",
+  "Targets": [{
+    "Arn": "arn:aws:lambda:us-east-1:123456789012:function:ProcessOrder",
+    "RoleArn": "arn:aws:iam::123456789012:role/EventBridgeRole"
+  }]
+}
+```
+
+## AWS サービス固有の注意点
+
+**CloudFormation:** テンプレートをアップロード前に `aws cloudformation validate-template` コマンドで検証してください。スタック依存関係を AWS::CloudFormation::Stack で明示することで参照エラーを防げます。
+
+**API Gateway:** リクエストモデルのスキーマ検証が有効な場合、リクエストボディが定義されたスキーマに一致しないと 422 が返されます。API Gateway コンソールで「Request Models」の設定を確認し、必要に応じて JSON Schema を修正してください。
+
+**DynamoDB:** PutItem や UpdateItem 操作で、テーブルの主キー属性の型が一致していない場合に 422 が発生します。Partition Key と Sort Key のデータ型（String、Number など）を確認してください。
+
+**SQS:** メッセージボディのサイズが 256 KB を超える場合、または属性値が無効な場合に 422 に相当するエラーが返されます。
+
+## それでも解決しない場合
+
+CloudFormation テンプレートのエラー詳細は AWS CloudFormation コンソールの「Events」タブで確認できます。詳細なエラーメッセージが表示されるため、ここから原因を特定することが多いです。
+
+API Gateway 経由のエラーの場合、CloudWatch Logs で API のエクスecution ログを有効化し、詳細なリクエスト・レスポンス情報を確認してください。ログは次のコマンドで確認できます:
+
+```bash
+aws logs tail /aws/apigateway/<your-api-id> --follow
+```
+
+AWS CLI コマンドの実行時は `--debug` フラグを付与することで、HTTP リクエスト・レスポンスの詳細を確認できます:
+
+```bash
+aws cloudformation validate-template --template-body file://template.yaml --debug
+```
+
+公式ドキュメント「AWS CloudFormation User Guide」の「Template Anatomy」や「API Gateway Developer Guide」の「Request and Response Data Mapping」を参照し、各サービスの仕様を確認することをお勧めします。GitHub の aws-cloudformation-user-guide リポジトリでも実例が豊富です。
+
+---
+
+*免責事項：本記事の内容は、執筆時点の公開情報をもとに作成したものです。ソフトウェアの仕様は予告なく変更されることがあります。最新の情報は各ツールの公式サポートページをご確認ください。本記事の情報を利用した結果生じたいかなる損害についても、著者および運営者は責任を負いかねます。*

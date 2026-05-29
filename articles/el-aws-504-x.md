@@ -1,0 +1,242 @@
+---
+title: "AWS の 504 エラー：原因と解決策"
+emoji: "☁️"
+type: "tech"
+topics: ["aws", "error"]
+published: true
+---
+
+## エラーの概要
+
+AWS で 504 Gateway Timeout が発生するのは、API Gateway、Application Load Balancer（ALB）、Network Load Balancer（NLB）といったエッジサービスが、バックエンドのリソース（Lambda、EC2、ECS等）からの応答を一定時間待っても返ってこないときです。つまり、リクエストは正しく転送されているものの、バックエンドの処理が遅すぎるか、そもそも応答できない状態に陥っています。AWS 環境では特定のタイムアウト制限があるため、この制限を超過するとクライアント側に 504 が返されます。
+
+## 実際のエラーメッセージ例
+
+**API Gateway 経由のリクエスト**
+```json
+{
+  "message": "Gateway Timeout",
+  "statusCode": 504,
+  "timestamp": "2024-01-15T10:23:45Z"
+}
+```
+
+**ALB のアクセスログ例**
+```
+http 504 0 -1 -1 "<request>" "-" "application/json" "-"
+```
+
+**CloudWatch Logs（Lambda タイムアウト）**
+```
+Task timed out after 300.00 seconds
+```
+
+## よくある原因と解決手順
+
+### 原因1：Lambda 関数がタイムアウト制限に到達している
+
+Lambda 関数の処理時間が、設定されたタイムアウト値（デフォルト3秒、最大15分）または API Gateway の統合タイムアウト（最大29秒）を超えています。特に API Gateway 経由の同期呼び出しでは、29秒という硬い制限があります。
+
+**Before（タイムアウトが発生する関数）**
+```python
+import time
+
+def lambda_handler(event, context):
+    # 外部APIへの遅いリクエスト
+    result = requests.get('https://slow-api.example.com/data', timeout=60)
+    
+    # 長時間のデータ処理
+    for i in range(1000000):
+        expensive_operation(i)
+        time.sleep(0.001)
+    
+    return {
+        'statusCode': 200,
+        'body': result.text
+    }
+```
+
+**After（タイムアウトを回避した関数）**
+```python
+import boto3
+import json
+
+def lambda_handler(event, context):
+    # タイムアウトの危険が高い処理は非同期に委譲
+    sqs = boto3.client('sqs')
+    queue_url = 'https://sqs.ap-northeast-1.amazonaws.com/xxxxx/processing-queue'
+    
+    # リクエストをキューに登録し、すぐに応答
+    sqs.send_message(
+        QueueUrl=queue_url,
+        MessageBody=json.dumps(event)
+    )
+    
+    return {
+        'statusCode': 202,
+        'body': json.dumps({'message': 'Processing started'})
+    }
+```
+
+**Lambda コンソールでのタイムアウト設定変更**
+1. AWS Lambda コンソール → 関数を選択 → 設定タブ
+2. 一般設定 → タイムアウト を編集（1秒～900秒の範囲内で設定）
+
+### 原因2：バックエンド（EC2/ECS）が応答不可な状態
+
+EC2 インスタンス、ECS タスク、または RDS がダウンしているか、リソース不足（メモリ、CPU）で応答遅延が発生しています。
+
+**Before（不健全なヘルスチェック設定）**
+```yaml
+# ALB ターゲットグループ設定（誤った例）
+HealthCheck:
+  Enabled: true
+  HealthyThresholdCount: 2
+  UnhealthyThresholdCount: 2
+  TimeoutSeconds: 2           # タイムアウトが短すぎる
+  IntervalSeconds: 30
+  Path: /health
+  Matcher:
+    HttpCode: "200"
+```
+
+**After（適切なヘルスチェック設定）**
+```yaml
+# ALB ターゲットグループ設定（改善例）
+HealthCheck:
+  Enabled: true
+  HealthyThresholdCount: 3
+  UnhealthyThresholdCount: 3
+  TimeoutSeconds: 6           # 十分な余裕を持たせる
+  IntervalSeconds: 30
+  Path: /health
+  Matcher:
+    HttpCode: "200-299"
+```
+
+**CloudWatch メトリクスでの監視**
+```bash
+aws cloudwatch get-metric-statistics \
+  --namespace AWS/ApplicationELB \
+  --metric-name TargetResponseTime \
+  --start-time 2024-01-15T10:00:00Z \
+  --end-time 2024-01-15T11:00:00Z \
+  --period 300 \
+  --statistics Average,Maximum
+```
+
+### 原因3：API Gateway の統合タイムアウトが短すぎる
+
+API Gateway は REST API の Lambda 統合で最大 29 秒の固定タイムアウトを持ちます。これより長い処理は完了前に切断されます。
+
+**Before（同期統合での長時間処理）**
+```python
+# Lambda 関数
+def lambda_handler(event, context):
+    # レポート生成に40秒かかる処理
+    report = generate_large_report(event['data'])
+    
+    return {
+        'statusCode': 200,
+        'body': json.dumps(report)
+    }
+```
+
+**After（非同期パターンに変更）**
+```python
+# Lambda 関数
+def lambda_handler(event, context):
+    s3 = boto3.client('s3')
+    sqs = boto3.client('sqs')
+    
+    # S3 に処理の詳細を保存
+    job_id = str(uuid.uuid4())
+    s3.put_object(
+        Bucket='<your-bucket>',
+        Key=f'jobs/{job_id}/input.json',
+        Body=json.dumps(event)
+    )
+    
+    # バックグラウンド処理をキューに登録
+    sqs.send_message(
+        QueueUrl='<your-queue-url>',
+        MessageBody=json.dumps({'job_id': job_id})
+    )
+    
+    return {
+        'statusCode': 202,
+        'body': json.dumps({
+            'message': 'Job submitted',
+            'job_id': job_id
+        })
+    }
+
+# ワーカー Lambda（SQS トリガー）
+def worker_lambda_handler(event, context):
+    # 時間制限なしでレポート生成
+    job_id = json.loads(event['Records'][0]['body'])['job_id']
+    report = generate_large_report(job_id)
+    
+    s3 = boto3.client('s3')
+    s3.put_object(
+        Bucket='<your-bucket>',
+        Key=f'jobs/{job_id}/output.json',
+        Body=json.dumps(report)
+    )
+```
+
+## ツール固有の注意点
+
+**API Gateway（REST API）**
+- 統合タイムアウト：29秒で固定。変更不可
+- 長時間処理は非同期パターン（SQS、SNS、Step Functions）で対応
+- HTTP API は 29 秒制限なし
+
+**Application Load Balancer（ALB）**
+- デフォルトのアイドルタイムアウト：60秒
+- 設定で延長可能だが、クライアント側の接続タイムアウトも考慮が必要
+- AWS CLI で確認・変更：
+```bash
+aws elbv2 describe-load-balancer-attributes \
+  --load-balancer-arn <your-alb-arn>
+
+aws elbv2 modify-load-balancer-attributes \
+  --load-balancer-arn <your-alb-arn> \
+  --attributes Key=idle_timeout.connection_closing.enabled,Value=true Key=idle_timeout.connection.tcp.fin_wait_duration.seconds,Value=120
+```
+
+**RDS への接続遅延**
+- コールドスタート時の接続確立が遅い場合は RDS Proxy を導入
+- Lambda VPC 設定による ENI 作成遅延（コールドスタート最大1分）は Provisioned Concurrency で軽減
+
+```bash
+aws lambda put-provisioned-concurrency-config \
+  --function-name <your-function> \
+  --provisioned-concurrent-executions 5 \
+  --qualifier LIVE
+```
+
+## それでも解決しない場合
+
+**CloudWatch Logs でバックエンド側のエラーを確認**
+```bash
+aws logs tail /aws/lambda/<your-function> --follow
+aws logs tail /aws/ecs/<your-cluster> --follow
+```
+
+**X-Ray で詳細なトレース分析を有効化**
+Lambda 関数に X-Ray デーモンの書き込み権限を付与し、セグメント分析で各処理のボトルネックを特定します。
+
+**AWS Support に問い合わせ時の情報**
+- リクエスト ID（CloudTrail の x-amzn-RequestId）
+- 504 発生時刻と CloudWatch メトリクスの該当期間
+- バックエンド側のリソース使用状況（CPU、メモリ）
+
+**参考資料**
+- 公式ドキュメント：「API Gateway タイムアウト」
+- 公式ドキュメント：「Lambda 関数構成」
+- AWS のブログ記事：「Lambda 非同期呼び出しパターン」
+
+---
+
+*免責事項：本記事の内容は、執筆時点の公開情報をもとに作成したものです。ソフトウェアの仕様は予告なく変更されることがあります。最新の情報は各ツールの公式サポートページをご確認ください。本記事の情報を利用した結果生じたいかなる損害についても、著者および運営者は責任を負いかねます。*

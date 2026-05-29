@@ -1,0 +1,203 @@
+---
+title: "AWS の 400 エラー：原因と解決策"
+emoji: "☁️"
+type: "tech"
+topics: ["aws", "error"]
+published: true
+---
+
+## エラーの概要
+
+AWS の HTTP 400 エラーは「Bad Request（不正なリクエスト）」を意味し、AWS API に送信されたリクエストに構文的な誤りや不正なパラメータが含まれている場合に返されます。AWS では API Gateway、S3、DynamoDB、Lambda、IAM など複数のサービスで発生する可能性があり、クライアント側の設定ミスやリクエスト形式の誤りが主な原因となります。
+
+## 実際のエラーメッセージ例
+
+AWS SDK を使用した場合、以下のようなエラーが出力されます。
+
+```json
+{
+  "Error": {
+    "Code": "BadRequest",
+    "Message": "1 validation error detected: Value null at 'instanceIds' failed to satisfy constraint: Member must not be null"
+  }
+}
+```
+
+AWS CLI での例：
+
+```bash
+$ aws s3api put-object --bucket <your-bucket-name> --key test.txt
+An error occurred (InvalidArgument) when calling the PutObject operation: The authorization header is malformed; the Credential is mal-formed; expecting 'AWS4-HMAC-SHA256 Credential=...'
+```
+
+## よくある原因と解決手順
+
+### 原因1：必須パラメータの欠落またはデータ型の誤り
+
+**なぜ発生するか**
+
+AWS API は厳密なパラメータ検証を行います。必須パラメータが指定されていない、または文字列型で数値を渡すなどデータ型が異なる場合、400 エラーが返されます。特に DynamoDB や EC2 API では顕著です。
+
+**Before（エラーが起きるコード）**
+
+```python
+import boto3
+
+dynamodb = boto3.client('dynamodb')
+
+# テーブル名を指定せず呼び出し
+response = dynamodb.scan()
+```
+
+**After（修正後）**
+
+```python
+import boto3
+
+dynamodb = boto3.client('dynamodb')
+
+# TableName（必須パラメータ）を指定
+response = dynamodb.scan(TableName='<your-table-name>')
+```
+
+### 原因2：ARN または リソース識別子の形式が誤っている
+
+**なぜ発生するか**
+
+IAM ポリシーの Resource フィールドや、Lambda の Layer ARN、S3 アクセスポイント ARN など、多くの AWS API は ARN（Amazon Resource Name）形式を要求します。ARN の構造が誤っていると 400 エラーが返されます。ARN の形式は `arn:aws:<service>:<region>:<account-id>:<resource-type>/<resource-id>` です。
+
+**Before（エラーが起きるコード）**
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::my-bucket"
+    }
+  ]
+}
+```
+
+**After（修正後）**
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::my-bucket/*"
+    }
+  ]
+}
+```
+
+### 原因3：リクエストボディの JSON 形式が不正
+
+**なぜ発生するか**
+
+API Gateway や Lambda を経由してリクエストを送信する際、JSON ペイロードが不正な形式（閉じられていないブレース、シングルクォーテーション使用など）だと 400 エラーが発生します。特に手動で JSON を構築する場合に起きやすいです。
+
+**Before（エラーが起きるコード）**
+
+```javascript
+const params = {
+  TableName: 'Users',
+  Item: {
+    userId: { S: '123' },
+    name: { S: 'John' }
+  }
+};
+
+// JSON.stringify で不正な形式になる場合
+const body = `{"TableName": "Users", "Item": {userId: '123'}}`;
+fetch('https://dynamodb.<region>.amazonaws.com/', {
+  method: 'POST',
+  body: body
+});
+```
+
+**After（修正後）**
+
+```javascript
+const params = {
+  TableName: 'Users',
+  Item: {
+    userId: { S: '123' },
+    name: { S: 'John' }
+  }
+};
+
+// 正しい JSON 形式
+const body = JSON.stringify({
+  TableName: 'Users',
+  Item: {
+    userId: { S: '123' },
+    name: { S: 'John' }
+  }
+});
+
+fetch('https://dynamodb.<region>.amazonaws.com/', {
+  method: 'POST',
+  body: body,
+  headers: { 'Content-Type': 'application/x-amz-json-1.0' }
+});
+```
+
+## ツール固有の注意点
+
+### API Gateway での 400 エラー
+
+API Gateway では、リクエストマッピングテンプレートの設定ミスや、バックエンドの Lambda 統合で不正な JSON を返した場合に 400 が発生します。CloudWatch Logs で「$context.error.messageString」や「$context.error.message」を確認して、具体的な検証エラーを特定します。
+
+### S3 での 400 エラー
+
+S3 API では、署名付き URL の署名アルゴリズムが誤っていたり、署名が有効期限切れであったり、カスタムヘッダーの名前が RFC に準拠していない場合に 400 が返されます。CloudTrail を確認して、リクエスト内容を詳細に検査します。
+
+### DynamoDB での 400 エラー
+
+DynamoDB では、属性値の型表記（例：S は String、N は Number）が誤っていたり、Key スキーマと一致しないパーティションキーを指定したりすると 400 が発生します。テーブル定義を確認し、パーティションキーとソートキーの型を正確に指定することが重要です。
+
+### IAM での 400 エラー
+
+IAM ポリシーをアップロードする際、JSON 形式の誤りや Principal の形式が誤っている場合に 400 が返されます。特にクロスアカウントアクセスを設定する場合は、Principal の ARN 形式を厳密に確認してください。
+
+## それでも解決しない場合
+
+**AWS CloudTrail でリクエスト内容を確認**
+
+CloudTrail ログを確認すると、AWS API に実際に送信されたリクエストの詳細（パラメータ、ヘッダー）と、API からの応答メッセージを確認できます。
+
+```bash
+$ aws cloudtrail lookup-events --lookup-attributes AttributeKey=ResourceName,AttributeValue=<your-resource-name>
+```
+
+**AWS SDKのデバッグログを有効化**
+
+Python boto3 の場合、ロギングレベルを DEBUG に設定してリクエストとレスポンスの詳細を確認します。
+
+```python
+import boto3
+import logging
+
+logging.basicConfig(level=logging.DEBUG)
+boto3.set_stream_logger('', logging.DEBUG)
+
+client = boto3.client('dynamodb')
+```
+
+**AWS 公式ドキュメントの確認**
+
+各サービスの「API Reference」ドキュメントで、必須パラメータのリスト、データ型制約、ARN 形式を確認してください。例えば DynamoDB であれば「AWS DynamoDB API Reference」の Scan / Query 操作セクションを参照します。
+
+**GitHub Issues および AWS Support**
+
+同じエラーが報告されていないか AWS SDK のリポジトリ（aws/aws-sdk-python など）の Issues を検索するか、本番環境での継続的な問題の場合は AWS Support に問い合わせて詳細な診断を受けることをお勧めします。
+
+---
+
+*免責事項：本記事の内容は、執筆時点の公開情報をもとに作成したものです。ソフトウェアの仕様は予告なく変更されることがあります。最新の情報は各ツールの公式サポートページをご確認ください。本記事の情報を利用した結果生じたいかなる損害についても、著者および運営者は責任を負いかねます。*

@@ -1,0 +1,223 @@
+---
+title: "Docker の 400 エラー：原因と解決策"
+emoji: "🐳"
+type: "tech"
+topics: ["docker", "error"]
+published: true
+---
+
+## エラーの概要
+
+Docker の 400 エラーは、クライアント側のリクエストが不正な形式であることを示すHTTPステータスコードです。Docker デーモンとの通信（コンテナの操作、イメージのプッシュ・プル、API呼び出し）の際に、形式不正なリクエストが送信された場合に発生します。多くの場合、Dockerfile の構文エラー、APIリクエストの形式ミス、または設定ファイルの不正な記述が原因です。
+
+## 実際のエラーメッセージ例
+
+```
+docker build -t myimage:latest .
+Step 1/5 : FROM ubuntu:20.04
+Step 2/5 : RUN apt-get update && apt-get install -y curl
+Step 3/5 : COPY . /app
+Step 4/5 : WORKDIR /app
+Step 5/5 : RUN python script.py
+Error response from daemon: invalid header field value "oci runtime error"
+Error response from daemon: HTTP/400: Bad Request
+```
+
+```json
+{
+  "message": "invalid request: malformed JSON in request body",
+  "code": 400,
+  "detail": "failed to decode request body"
+}
+```
+
+## よくある原因と解決手順
+
+### 原因1：Dockerfile の RUN コマンドの構文エラー
+
+**なぜ発生するか**
+Dockerfile の RUN コマンドで行末の区切り文字（バックスラッシュ）が正しく使われていないか、シェルコマンドの構文が不正な場合に、Docker デーモンが該当行を解析できず 400 エラーを返します。
+
+**Before（エラーが起きる状態）**
+```dockerfile
+FROM ubuntu:20.04
+RUN apt-get update && \
+    apt-get install -y python3 \
+    curl
+RUN echo "Installation complete"
+```
+
+**After（修正後）**
+```dockerfile
+FROM ubuntu:20.04
+RUN apt-get update && \
+    apt-get install -y python3 \
+    curl
+RUN echo "Installation complete"
+```
+
+正しくは、継続する各行の末尾に `\` を記述し、改行をコマンドの一部として解釈させます。
+
+### 原因2：docker-compose.yml の YAML 形式の不正
+
+**なぜ発生するか**
+docker-compose ファイルでインデント（空白）が不規則であるか、キー名の引用符が不完全な場合、YAML パーサーが設定を読み込めず、Docker デーモンへのリクエストが不正な形式になります。
+
+**Before（エラーが起きる状態）**
+```yaml
+version: '3.8'
+services:
+  web:
+    image: nginx:latest
+    ports:
+      - "80:80"
+    environment:
+      - NGINX_HOST=example.com
+      - NGINX_PORT: 80
+    volumes:
+    - ./html:/usr/share/nginx/html
+```
+
+**After（修正後）**
+```yaml
+version: '3.8'
+services:
+  web:
+    image: nginx:latest
+    ports:
+      - "80:80"
+    environment:
+      - NGINX_HOST=example.com
+      - NGINX_PORT=80
+    volumes:
+      - ./html:/usr/share/nginx/html
+```
+
+キー `NGINX_PORT` の値は `=` で区切り（`:`ではなく）、`volumes` のインデントを統一します。
+
+### 原因3：Docker API の JSON リクエスト形式が不正
+
+**なぜ発生するか**
+Docker Remote API（HTTP で Docker デーモンと通信する場合）を使用する際、リクエストボディの JSON が不正な形式または必須フィールドが欠けている場合、400 エラーが返されます。
+
+**Before（エラーが起きる状態）**
+```bash
+curl -X POST http://localhost:2375/containers/create \
+  -H "Content-Type: application/json" \
+  -d '{
+    "Image": "ubuntu:20.04",
+    "Cmd": ["echo", "hello]
+  }'
+```
+
+JSON が不完全です（`"hello]` のクォートが閉じられていません）。
+
+**After（修正後）**
+```bash
+curl -X POST http://localhost:2375/containers/create \
+  -H "Content-Type: application/json" \
+  -d '{
+    "Image": "ubuntu:20.04",
+    "Cmd": ["echo", "hello"],
+    "Tty": true
+  }'
+```
+
+JSON の構文を正しく閉じ、必須フィールドを完成させます。
+
+### 原因4：docker push 時のタグ形式の誤り
+
+**なぜ発生するか**
+Docker レジストリ（Docker Hub や プライベートレジストリ）にイメージをプッシュする際、タグ形式が不正であるか、認証情報が不足している場合、レジストリが 400 エラーを返します。
+
+**Before（エラーが起きる状態）**
+```bash
+docker tag myapp:latest myregistry.com/myapp
+docker push myregistry.com/myapp
+# Error response from daemon: HTTP/400: Bad Request
+```
+
+タグに version が含まれていません。
+
+**After（修正後）**
+```bash
+docker tag myapp:latest myregistry.com/myapp:latest
+docker push myregistry.com/myapp:latest
+```
+
+レジストリ URL、リポジトリ名、タグを完全な形式で指定します。
+
+## Docker 固有の注意点
+
+### docker-compose ネットワーク設定でのエラー
+
+docker-compose で複数のサービス間の通信設定が不正な場合、400 エラーが発生することがあります。特に `networks` セクションで指定するネットワーク名やドライバーが不正であると、コンテナ起動時にデーモンがリクエストを拒否します。
+
+```yaml
+version: '3.8'
+services:
+  app:
+    image: myapp:latest
+    networks:
+      - backend
+networks:
+  backend:
+    driver: bridge
+```
+
+### Docker ソケット接続時の権限問題
+
+Docker デーモンへの接続に使用される `/var/run/docker.sock` へのアクセス権がない場合、結果として 400 エラーとして報告されることがあります。ユーザーが `docker` グループに属していることを確認してください。
+
+```bash
+sudo usermod -aG docker $USER
+newgrp docker
+```
+
+### レジストリ認証情報の不完全性
+
+Docker Hub や プライベートレジストリに認証なしでプッシュしようとした場合、サーバーが 400 エラーを返すことがあります。事前に `docker login` を実行してください。
+
+```bash
+docker login
+# ユーザー名とパスワードを入力
+docker push myregistry.com/myapp:latest
+```
+
+## それでも解決しない場合
+
+### デバッグログの確認
+
+Docker デーモンの詳細ログを確認することで、エラーの正確な原因が判明することがあります。
+
+```bash
+dockerd --debug 2>&1 | grep -i "400\|bad request"
+```
+
+または、Docker コマンドに `-D` フラグを追加して詳細情報を表示します。
+
+```bash
+docker -D build -t myimage:latest .
+```
+
+### Dockerfile のバリデーション
+
+Dockerfile の構文を事前にチェックするには、Hadolint などのツールを使用してください。
+
+```bash
+hadolint Dockerfile
+```
+
+### 公式ドキュメントの確認
+
+- [Docker Build reference](https://docs.docker.com/reference/dockerfile/) - Dockerfile の正確な構文
+- [Docker Compose specification](https://docs.docker.com/compose/compose-file/) - docker-compose.yml の仕様
+- [Docker Engine API](https://docs.docker.com/engine/api/) - Remote API の詳細
+
+### コミュニティリソース
+
+Docker の GitHub Issues や Stack Overflow で同様のエラーが報告されていないか検索してください。特に `docker-compose` や特定のバージョンでの互換性問題は GitHub の Issues で詳細が共有されていることが多いです。
+
+---
+
+*免責事項：本記事の内容は、執筆時点の公開情報をもとに作成したものです。ソフトウェアの仕様は予告なく変更されることがあります。最新の情報は各ツールの公式サポートページをご確認ください。本記事の情報を利用した結果生じたいかなる損害についても、著者および運営者は責任を負いかねます。*

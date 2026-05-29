@@ -1,0 +1,239 @@
+---
+title: "AWS の 502 エラー：原因と解決策"
+emoji: "☁️"
+type: "tech"
+topics: ["aws", "error"]
+published: true
+---
+
+## エラーの概要
+
+502 Bad Gateway は、API Gateway や Application Load Balancer（ALB）がバックエンド（EC2、Lambda、ECS など）から不正な応答を受け取った、あるいは応答を得られなかったことを示すエラーです。AWS 環境では、バックエンドサービスの一時的な障害やタイムアウト、リソース不足など複数の原因で発生しやすいステータスコードです。
+
+## 実際のエラーメッセージ例
+
+**API Gateway から返されるレスポンス例：**
+
+```json
+{
+  "message": "502 Bad Gateway"
+}
+```
+
+**CloudWatch Logs に記録されるロードバランサーのログ例：**
+
+```
+[ALB] 2024-01-15T10:23:45Z app/my-app/1234567890abcdef 192.0.2.1:54321 10.0.1.100:8080 0.050 0.100 0 502 - - arn:aws:elasticloadbalancing:ap-northeast-1:123456789012:targetgroup/my-targets/1234567890abcdef "GET http://example.com/ HTTP/1.1" "Mozilla/5.0" - arn:aws:acm:ap-northeast-1:123456789012:certificate/12345678-1234-1234-1234-123456789012 - ecs default - -
+```
+
+## よくある原因と解決手順
+
+### 原因1：バックエンドのタイムアウトまたはクラッシュ
+
+Lambda 関数や EC2 インスタンス上のアプリケーションが処理中にタイムアウトするか、予期せず停止している場合、ALB や API Gateway は 502 を返します。
+
+**Before（タイムアウト設定が不適切）：**
+
+```python
+# Lambda 関数がタイムアウト時間内に完了できない
+import time
+
+def lambda_handler(event, context):
+    time.sleep(35)  # デフォルトのタイムアウト 30秒を超える
+    return {"statusCode": 200}
+```
+
+**After（タイムアウトを延長し、処理を最適化）：**
+
+```python
+# 1. Lambda のタイムアウトを設定値から 60秒に増やす（コンソール or CloudFormation で実施）
+# 2. 長時間処理は非同期キューに移行
+
+import boto3
+import json
+
+def lambda_handler(event, context):
+    sqs = boto3.client('sqs')
+    # 重い処理をキューに送信
+    sqs.send_message(
+        QueueUrl='<your-sqs-queue-url>',
+        MessageBody=json.dumps(event)
+    )
+    return {"statusCode": 202, "message": "Processing started"}
+```
+
+### 原因2：ヘルスチェックの失敗
+
+ALB のターゲットグループが、バックエンドの健全性チェック（ヘルスチェック）に失敗し、すべてのターゲットが Unhealthy 状態になっている場合、リクエストは処理できず 502 が返されます。
+
+**Before（ヘルスチェックパスが不正）：**
+
+```yaml
+TargetGroup:
+  Type: AWS::ElasticLoadBalancingV2::TargetGroup
+  Properties:
+    Port: 8080
+    Protocol: HTTP
+    HealthCheckPath: /api/status  # このエンドポイントが存在しない
+    HealthCheckIntervalSeconds: 30
+    HealthyThresholdCount: 2
+    UnhealthyThresholdCount: 3
+```
+
+**After（正しいヘルスチェックパスに修正）：**
+
+```yaml
+TargetGroup:
+  Type: AWS::ElasticLoadBalancingV2::TargetGroup
+  Properties:
+    Port: 8080
+    Protocol: HTTP
+    HealthCheckPath: /health  # アプリケーションが提供しているパス
+    HealthCheckIntervalSeconds: 30
+    HealthyThresholdCount: 2
+    UnhealthyThresholdCount: 3
+    Matcher:
+      HttpCode: 200-299  # 200-299 の範囲を成功と判定
+```
+
+**確認コマンド（ターゲットの健全性をチェック）：**
+
+```bash
+aws elbv2 describe-target-health \
+  --target-group-arn arn:aws:elasticloadbalancing:ap-northeast-1:123456789012:targetgroup/my-targets/1234567890abcdef \
+  --region ap-northeast-1
+```
+
+### 原因3：バックエンドのメモリ不足またはリソース枯渇
+
+EC2 インスタンスやコンテナの CPU・メモリが枯渇すると、リクエストの処理中にアプリケーションがクラッシュし、502 が発生します。
+
+**Before（リソース監視がない状態）：**
+
+```bash
+# EC2 インスタンスにアプリケーションをデプロイしているが、
+# スケーリング設定が無く、トラフィック急増で過負荷状態に
+```
+
+**After（Auto Scaling と CloudWatch アラームを設定）：**
+
+```yaml
+AutoScalingGroup:
+  Type: AWS::AutoScaling::AutoScalingGroup
+  Properties:
+    MinSize: 2
+    MaxSize: 10
+    DesiredCapacity: 3
+    TargetGroupARNs:
+      - arn:aws:elasticloadbalancing:ap-northeast-1:123456789012:targetgroup/my-targets/1234567890abcdef
+    LaunchTemplate:
+      LaunchTemplateId: lt-1234567890abcdef
+
+ScalingPolicy:
+  Type: AWS::AutoScaling::ScalingPolicy
+  Properties:
+    AdjustmentType: ChangeInCapacity
+    AutoScalingGroupName: !Ref AutoScalingGroup
+    PolicyType: TargetTrackingScaling
+    TargetTrackingConfiguration:
+      PredefinedMetricSpecification:
+        PredefinedMetricType: ASGAverageCPUUtilization
+      TargetValue: 70
+```
+
+### 原因4：セキュリティグループまたはネットワークACLの設定ミス
+
+バックエンド（EC2、Lambda VPC モード）への通信がセキュリティグループで遮断されている場合、ALB はバックエンドに接続できず 502 を返します。
+
+**Before（セキュリティグループが閉じている）：**
+
+```bash
+# ターゲット EC2 のセキュリティグループ
+# インバウンドルール：なし（すべてのトラフィックが拒否）
+```
+
+**After（ALB からの通信を許可）：**
+
+```yaml
+BackendSecurityGroup:
+  Type: AWS::EC2::SecurityGroup
+  Properties:
+    GroupDescription: Backend security group
+    VpcId: vpc-12345678
+    SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 8080
+        ToPort: 8080
+        SourceSecurityGroupId: sg-alb1234567890abcdef  # ALB のセキュリティグループ
+```
+
+## ツール固有の注意点
+
+### API Gateway の場合
+
+API Gateway バックエンドで 502 が多発する場合、**統合タイムアウト**と**スロットリング**を確認してください。
+
+```bash
+# API Gateway のメトリクスを CloudWatch で確認
+aws cloudwatch get-metric-statistics \
+  --namespace AWS/ApiGateway \
+  --metric-name 5XXError \
+  --dimensions Name=ApiName,Value=my-api \
+  --start-time 2024-01-15T00:00:00Z \
+  --end-time 2024-01-15T12:00:00Z \
+  --period 300 \
+  --statistics Sum
+```
+
+また、Lambda バックエンドの場合は**スロットル（同時実行数制約）**が 502 の原因になることがあります。Lambda のリザーブド同時実行数を増やすか、SQS トリガーで非同期処理に切り替えてください。
+
+### ECS + ALB の場合
+
+ECS タスクが頻繁に停止・再起動されている場合、タスク定義の CPU・メモリが不足していないか、コンテナログを確認してください。
+
+```bash
+aws logs tail /ecs/my-service --follow
+```
+
+### Lambda 環境での VPC 設定
+
+Lambda を VPC 内で実行している場合、NAT Gateway やサブネット設定の問題で外部リソースへの通信が失敗し、502 につながることがあります。CloudWatch Logs で Lambda の詳細なエラーを確認してください。
+
+```bash
+aws logs tail /aws/lambda/my-function --follow
+```
+
+## それでも解決しない場合
+
+### 確認すべきログ
+
+1. **CloudWatch Logs**：
+   - `/aws/apigateway/my-api`（API Gateway ログ）
+   - `/aws/lambda/my-function`（Lambda ログ）
+   - `/ecs/my-service`（ECS ログ）
+
+2. **ALB アクセスログ**：
+   - S3 に出力されているアクセスログを確認し、レスポンスコード `502` の行を抽出
+
+   ```bash
+   aws s3 cp s3://<your-bucket>/alb-logs/AWSLogs/<account-id>/elasticloadbalancing/<region>/<year>/<month>/<day>/ . --recursive
+   grep " 502 " *.log
+   ```
+
+3. **X-Ray トレース**（Lambda で有効化している場合）：
+   - AWS Management Console の X-Ray で詳細な実行フロー・遅延を確認
+
+### 公式ドキュメント
+
+- [API Gateway トラブルシューティング](https://docs.aws.amazon.com/ja_jp/apigateway/latest/developerguide/troubleshooting-api-gateway.html)
+- [Application Load Balancer のトラブルシューティング](https://docs.aws.amazon.com/ja_jp/elasticloadbalancing/latest/application/load-balancer-troubleshooting.html)
+- [Lambda タイムアウトと実行時間](https://docs.aws.amazon.com/ja_jp/lambda/latest/dg/limits.html)
+
+### コミュニティリソース
+
+- [AWS Support Community](https://forums.aws.amazon.com/forum.jspa?forumID=87)
+- [GitHub - aws-samples](https://github.com/aws-samples)（AWS 公式サンプルコード）
+
+---
+
+*免責事項：本記事の内容は、執筆時点の公開情報をもとに作成したものです。ソフトウェアの仕様は予告なく変更されることがあります。最新の情報は各ツールの公式サポートページをご確認ください。本記事の情報を利用した結果生じたいかなる損害についても、著者および運営者は責任を負いかねます。*

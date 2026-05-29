@@ -1,0 +1,193 @@
+---
+title: "AWS の 409 エラー：原因と解決策"
+emoji: "☁️"
+type: "tech"
+topics: ["aws", "error"]
+published: true
+---
+
+## エラーの概要
+
+AWSの409（Conflict）エラーは、リクエストの内容がAWSリソースの現在の状態と競合していることを示します。このエラーはS3、EC2、DynamoDB、CloudFormation、IAMなど複数のAWSサービスで発生し、リソースが完了していない状態遷移中であったり、既に同じ名前のリソースが存在していたりするときに返されます。一時的な問題か永続的な設定ミスかを判別することが解決の第一歩となります。
+
+## 実際のエラーメッセージ例
+
+**S3バケット作成時:**
+```json
+{
+  "Error": {
+    "Code": "BucketAlreadyExists",
+    "Message": "The requested bucket name is not available. The bucket namespace is shared by all AWS accounts."
+  },
+  "ResponseMetadata": {
+    "HTTPStatusCode": 409
+  }
+}
+```
+
+**EC2インスタンス操作時:**
+```json
+{
+  "Error": {
+    "Code": "InvalidInstanceID.Transitional",
+    "Message": "The instance ID 'i-0123456789abcdef0' is in a transitional state."
+  },
+  "ResponseMetadata": {
+    "HTTPStatusCode": 409
+  }
+}
+```
+
+## よくある原因と解決手順
+
+### 原因1: S3バケット名の重複
+
+S3バケット名はグローバルで一意である必要があります。既に別のAWSアカウント（あるいは自分のアカウント）で使用されている名前でバケットを作成しようとすると409エラーが発生します。
+
+**Before（エラーが起きるコード）:**
+```python
+import boto3
+
+s3_client = boto3.client('s3')
+
+# 一般的な名前を使用 → 既に取られている可能性が高い
+response = s3_client.create_bucket(Bucket='my-application-data')
+```
+
+**After（修正後）:**
+```python
+import boto3
+import time
+
+s3_client = boto3.client('s3')
+
+# タイムスタンプを含めて一意の名前にする
+bucket_name = f'my-application-data-{int(time.time())}'
+response = s3_client.create_bucket(Bucket=bucket_name)
+print(f"Bucket created: {bucket_name}")
+```
+
+### 原因2: EC2インスタンスの状態遷移中の操作
+
+EC2インスタンスが起動中（pending）、停止中（stopping）、終了中（shutting-down）などの遷移状態にあるときに、インスタンスの再起動や削除などの操作を実行すると409エラーが返されます。
+
+**Before（エラーが起きるコード）:**
+```python
+import boto3
+
+ec2_client = boto3.client('ec2')
+
+# インスタンスを起動してすぐに他の操作を実行
+ec2_client.start_instances(InstanceIds=['i-0123456789abcdef0'])
+
+# 状態遷移中に削除を試みるとエラー
+ec2_client.terminate_instances(InstanceIds=['i-0123456789abcdef0'])
+```
+
+**After（修正後）:**
+```python
+import boto3
+import time
+
+ec2_client = boto3.client('ec2')
+ec2 = boto3.resource('ec2')
+
+instance = ec2.Instance('i-0123456789abcdef0')
+
+# インスタンスを起動
+ec2_client.start_instances(InstanceIds=['i-0123456789abcdef0'])
+
+# インスタンスの状態遷移が完了するまで待機
+instance.wait_until_running()
+print("Instance is now running")
+
+# 状態が安定してから操作を実行
+ec2_client.terminate_instances(InstanceIds=['i-0123456789abcdef0'])
+```
+
+### 原因3: DynamoDBテーブルの状態遷移
+
+DynamoDBテーブルが作成処理中（CREATING）や削除処理中（DELETING）の状態にあるときに、テーブルスキーマの更新やGSI（グローバルセカンダリインデックス）の追加などを実行すると409エラーが発生します。
+
+**Before（エラーが起きるコード）:**
+```python
+import boto3
+
+dynamodb_client = boto3.client('dynamodb')
+
+# テーブル作成
+dynamodb_client.create_table(
+    TableName='MyTable',
+    KeySchema=[{'AttributeName': 'id', 'KeyType': 'HASH'}],
+    AttributeDefinitions=[{'AttributeName': 'id', 'AttributeType': 'S'}],
+    BillingMode='PAY_PER_REQUEST'
+)
+
+# テーブル作成直後にGSIを追加 → テーブルはまだ CREATING 状態
+dynamodb_client.update_table(
+    TableName='MyTable',
+    AttributeDefinitions=[
+        {'AttributeName': 'id', 'AttributeType': 'S'},
+        {'AttributeName': 'sort_key', 'AttributeType': 'S'}
+    ]
+)
+```
+
+**After（修正後）:**
+```python
+import boto3
+import time
+
+dynamodb_client = boto3.client('dynamodb')
+
+# テーブル作成
+dynamodb_client.create_table(
+    TableName='MyTable',
+    KeySchema=[{'AttributeName': 'id', 'KeyType': 'HASH'}],
+    AttributeDefinitions=[{'AttributeName': 'id', 'AttributeType': 'S'}],
+    BillingMode='PAY_PER_REQUEST'
+)
+
+# テーブルがアクティブになるまで待機
+waiter = dynamodb_client.get_waiter('table_exists')
+waiter.wait(TableName='MyTable')
+print("Table is now active")
+
+# テーブルが安定してからスキーマ更新
+dynamodb_client.update_table(
+    TableName='MyTable',
+    AttributeDefinitions=[
+        {'AttributeName': 'id', 'AttributeType': 'S'},
+        {'AttributeName': 'sort_key', 'AttributeType': 'S'}
+    ]
+)
+```
+
+## AWS サービス固有の注意点
+
+**CloudFormation:** スタック更新中に同じスタックに対して別の更新を実行すると409エラーが返されます。CloudFormationは一度に1つの更新操作しか受け付けません。前回の更新完了を確認してから次の更新を実行する必要があります。
+
+**IAM:** ロールやユーザーに対してアタッチ中のインラインポリシーを削除しようとすると409エラーが発生することがあります。AWS管理ポリシーに切り替えてからインラインポリシーを削除するなど、段階的な変更を行う必要があります。
+
+**RDS:** DBインスタンスがスナップショット作成中や修正適用中（maintenance window）のときに、削除や再起動を実行すると409エラーが返されます。現在の操作完了を待つか、保留中の操作を確認する必要があります。
+
+## それでも解決しない場合
+
+CloudWatch Logsでサービスのログを確認し、「TransitionalState」や「InProgress」などのキーワードを検索してください。AWS CLIを使う場合は、以下のコマンドでリソースの詳細な状態を確認できます。
+
+```bash
+# EC2インスタンスの状態確認
+aws ec2 describe-instances --instance-ids i-0123456789abcdef0 --query 'Reservations[0].Instances[0].{State:State,StatusChecks:StatusChecksFailed}'
+
+# DynamoDBテーブルの状態確認
+aws dynamodb describe-table --table-name MyTable --query 'Table.TableStatus'
+
+# CloudFormationスタックの状態確認
+aws cloudformation describe-stacks --stack-name <your-stack-name> --query 'Stacks[0].StackStatus'
+```
+
+公式ドキュメントの「AWSサービスのステータス」ページで、サービス全体に障害がないか確認することも重要です。また、AWS Support（有償会員）に問い合わせる場合は、エラーレスポンスのRequestIDを提供するとサポートチームが迅速に調査できます。
+
+---
+
+*免責事項：本記事の内容は、執筆時点の公開情報をもとに作成したものです。ソフトウェアの仕様は予告なく変更されることがあります。最新の情報は各ツールの公式サポートページをご確認ください。本記事の情報を利用した結果生じたいかなる損害についても、著者および運営者は責任を負いかねます。*

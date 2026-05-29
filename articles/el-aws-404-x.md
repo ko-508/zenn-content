@@ -1,0 +1,205 @@
+---
+title: "AWS の 404 エラー：原因と解決策"
+emoji: "☁️"
+type: "tech"
+topics: ["aws", "error"]
+published: true
+---
+
+## エラーの概要
+
+AWS の 404 エラーは「Not Found」を意味し、指定したリソースが見つからないことを示します。S3 バケット、EC2 インスタンス、API Gateway、Lambda 関数など、あらゆる AWS サービスで発生する可能性があります。このエラーが返される場合、リソースが存在しない、リソース名が誤っている、別のリージョンに存在している、またはアクセス権限がないなどの原因が考えられます。
+
+## 実際のエラーメッセージ例
+
+S3 へのアクセス時のエラーレスポンス：
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<Error>
+    <Code>NoSuchKey</Code>
+    <Message>The specified key does not exist.</Message>
+    <Key>nonexistent-file.txt</Key>
+    <BucketName>my-bucket</BucketName>
+    <RequestId>4TZ432A73F8A1A1A</RequestId>
+    <HostId>SlFydFBhMjMzMzM3L2ZpbGUuanNvbg==</HostId>
+</Error>
+```
+
+AWS CLI でのエラーメッセージ：
+
+```json
+{
+    "Error": {
+        "Code": "ResourceNotFoundException",
+        "Message": "Could not connect to the endpoint URL: https://dynamodb.<region>.amazonaws.com/"
+    },
+    "ResponseMetadata": {
+        "RequestId": "12345678-1234-1234-1234-123456789012",
+        "HTTPStatusCode": 404,
+        "HTTPHeaders": {
+            "date": "Thu, 15 Jan 2024 10:30:00 GMT"
+        }
+    }
+}
+```
+
+## よくある原因と解決手順
+
+### 原因 1：リソース名またはリソース ID のスペルが誤っている
+
+リソース名に小文字・大文字の違いやハイフンの位置が異なると 404 エラーが発生します。AWS では大文字小文字を区別するサービスが多いため、タイプミスは高確率で 404 につながります。
+
+**Before（エラーが起きる例）：**
+
+```bash
+# S3 バケト名が誤っている
+aws s3 cp myfile.txt s3://my-backet/path/
+
+# Lambda 関数名が誤っている
+aws lambda invoke --function-name MyLamda output.json
+```
+
+**After（修正後）：**
+
+```bash
+# 正しいバケト名を指定
+aws s3 cp myfile.txt s3://my-bucket/path/
+
+# 正しい関数名を指定（大文字小文字を確認）
+aws lambda invoke --function-name myLambda output.json
+```
+
+### 原因 2：リソースが別のリージョンに存在している
+
+AWS ではリソースがリージョン単位で管理されます。東京リージョン（ap-northeast-1）に作成した EC2 インスタンスを、シンガポール（ap-southeast-1）から参照しようとすると 404 になります。
+
+**Before（エラーが起きる例）：**
+
+```bash
+# デフォルトリージョン us-east-1 で検索（実際には ap-northeast-1 に存在）
+aws ec2 describe-instances --instance-ids i-0123456789abcdef0
+
+# 返値：
+# An error occurred (InvalidInstanceID.NotFound) when calling the DescribeInstances operation: The instance ID 'i-0123456789abcdef0' does not exist
+```
+
+**After（修正後）：**
+
+```bash
+# 正しいリージョンを指定
+aws ec2 describe-instances \
+  --instance-ids i-0123456789abcdef0 \
+  --region ap-northeast-1
+
+# または AWS CLI の設定ファイルでデフォルトリージョンを設定
+# ~/.aws/config の [default] セクションに以下を追加
+# region = ap-northeast-1
+```
+
+### 原因 3：リソースが削除されているか、まだ作成されていない
+
+リソース作成直後に即座にアクセスしようとすると、リソースの初期化完了前にアクセスしたために 404 が返される場合があります。また、別のユーザーがリソースを削除している可能性もあります。
+
+**Before（エラーが起きる例）：**
+
+```bash
+# DynamoDB テーブル作成直後にすぐクエリ実行
+aws dynamodb create-table \
+  --table-name MyTable \
+  --attribute-definitions AttributeName=id,AttributeType=S \
+  --key-schema AttributeName=id,KeyType=HASH \
+  --billing-mode PAY_PER_REQUEST
+
+# 即座にクエリ実行（テーブル初期化完了前）
+aws dynamodb get-item \
+  --table-name MyTable \
+  --key '{"id":{"S":"test"}}'
+```
+
+**After（修正後）：**
+
+```bash
+# テーブル作成後、ステータスが ACTIVE になるまで待機
+aws dynamodb wait table-exists --table-name MyTable
+
+# その後でクエリ実行
+aws dynamodb get-item \
+  --table-name MyTable \
+  --key '{"id":{"S":"test"}}'
+```
+
+## ツール固有の注意点
+
+### S3 でよくある 404 の原因
+
+S3 バケトポリシーでパブリックアクセスがブロックされている場合、バケトやオブジェクトが存在しても 404 が返されることがあります。これはセキュリティ上の理由から仕様通りの動作です。
+
+```bash
+# バケトが存在するか確認
+aws s3api head-bucket --bucket my-bucket --region ap-northeast-1
+
+# オブジェクトが存在するか確認（IAM 権限が必要）
+aws s3api head-object --bucket my-bucket --key path/to/file.txt
+```
+
+### API Gateway での 404 エラー
+
+API Gateway の ステージが正しく設定されていない、または リソースパスが定義されていない場合に 404 が返されます。
+
+```bash
+# API ID とリソース ID を確認
+aws apigateway get-rest-apis
+aws apigateway get-resources --rest-api-id <api-id>
+
+# エンドポイント URL がステージ名を含んでいるか確認
+# 正しい形式：https://<api-id>.execute-api.<region>.amazonaws.com/<stage-name>/<resource-path>
+```
+
+### DynamoDB での ResourceNotFoundException
+
+テーブルが存在しないか、テーブル名のスペルが誤っている場合に発生します。オンデマンド課金の場合、テーブル作成直後にアクセスしても初期化完了前であれば 404 になる可能性があります。
+
+```bash
+# テーブルのステータスを確認
+aws dynamodb describe-table --table-name MyTable --region ap-northeast-1 | grep TableStatus
+
+# テーブル一覧から存在確認
+aws dynamodb list-tables --region ap-northeast-1
+```
+
+### Lambda での ResourceNotFoundException
+
+関数が存在しないか、エイリアスまたはバージョン指定が誤っている場合に発生します。
+
+```bash
+# 関数の存在確認
+aws lambda get-function --function-name myLambda --region ap-northeast-1
+
+# エイリアスやバージョンを指定している場合
+aws lambda get-function --function-name myLambda:LIVE --region ap-northeast-1
+```
+
+## それでも解決しない場合
+
+AWS CloudTrail でリクエストの詳細ログを確認し、エラーの発生箇所を特定します。CloudTrail は AWS マネジメントコンソールから有効化できます。
+
+```bash
+# CloudTrail イベント履歴を確認（CLI の場合）
+aws cloudtrail lookup-events \
+  --lookup-attributes AttributeKey=ResourceName,AttributeValue=my-bucket \
+  --region ap-northeast-1 \
+  --max-results 10
+```
+
+AWS Support に問い合わせる際は、以下の情報を準備してください。
+- リージョン名
+- リソース ARN（Amazon Resource Name）
+- リクエスト ID（レスポンスヘッダーに含まれます）
+- CloudTrail のイベントログ抜粋
+
+公式ドキュメントの「AWS リソースへのアクセスのトラブルシューティング」や「IAM ベストプラクティス」も参考になります。GitHub Issues では、特定のサービス（S3、Lambda など）の問題報告が集約されているため、同じ問題の解決事例を検索するとよいでしょう。
+
+---
+
+*免責事項：本記事の内容は、執筆時点の公開情報をもとに作成したものです。ソフトウェアの仕様は予告なく変更されることがあります。最新の情報は各ツールの公式サポートページをご確認ください。本記事の情報を利用した結果生じたいかなる損害についても、著者および運営者は責任を負いかねます。*

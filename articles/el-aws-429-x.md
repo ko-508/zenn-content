@@ -1,0 +1,195 @@
+---
+title: "AWS の 429 エラー：原因と解決策"
+emoji: "☁️"
+type: "tech"
+topics: ["aws", "error"]
+published: true
+---
+
+## エラーの概要
+
+429 Too Many Requests は、AWS API への呼び出し頻度が一定期間内の上限を超えた場合に返されるステータスコードです。AWS の各サービスには呼び出し回数の制限（レート制限）が設定されており、これを超えるとクライアント側の問題として 429 エラーで応答が拒否されます。このエラーは一時的なものが多いため、適切な対応により解決可能です。
+
+## 実際のエラーメッセージ例
+
+```json
+{
+  "Error": {
+    "Code": "ThrottlingException",
+    "Message": "Rate exceeded"
+  }
+}
+```
+
+```bash
+An error occurred (Throttling) when calling the DescribeInstances operation: 
+Request rate exceeded. Please retry your request.
+```
+
+```python
+botocore.exceptions.ClientError: An error occurred (ThrottlingException) 
+when calling the GetObject operation: Rate exceeded
+```
+
+## よくある原因と解決手順
+
+### 原因1：API 呼び出し間隔の不足
+
+**なぜ発生するか**：ループ内で連続的に API を呼び出す場合、AWS が許容する 1 秒あたりのリクエスト数を瞬間的に超えるため。
+
+Before（エラーが起きるコード）：
+```python
+import boto3
+
+s3_client = boto3.client('s3')
+
+# 100個のオブジェクトを一括処理
+for key in object_keys:
+    response = s3_client.get_object(Bucket='<your-bucket>', Key=key)
+    process_data(response)
+```
+
+After（修正後）：
+```python
+import boto3
+import time
+
+s3_client = boto3.client('s3')
+
+# 呼び出しの間隔を0.1秒設定
+for key in object_keys:
+    response = s3_client.get_object(Bucket='<your-bucket>', Key=key)
+    process_data(response)
+    time.sleep(0.1)  # API呼び出し間隔を設ける
+```
+
+### 原因2：複数プロセス・スレッドからの同時呼び出し
+
+**なぜ発生するか**：並列処理で複数スレッドやプロセスが同時に同じ AWS API を呼び出すと、合計リクエスト数が急増して制限を超えるため。
+
+Before（エラーが起きるコード）：
+```python
+from concurrent.futures import ThreadPoolExecutor
+import boto3
+
+dynamodb = boto3.client('dynamodb')
+
+def scan_items(table_name):
+    return dynamodb.scan(TableName=table_name)
+
+# 10個のスレッドで同時にスキャン
+with ThreadPoolExecutor(max_workers=10) as executor:
+    futures = [executor.submit(scan_items, table) for table in tables]
+    results = [f.result() for f in futures]
+```
+
+After（修正後）：
+```python
+from concurrent.futures import ThreadPoolExecutor
+import boto3
+import time
+from threading import Semaphore
+
+dynamodb = boto3.client('dynamodb')
+semaphore = Semaphore(2)  # 同時実行数を2に制限
+
+def scan_items(table_name):
+    with semaphore:  # 一度に2スレッドのみ実行
+        time.sleep(0.2)  # 呼び出し前に待機
+        return dynamodb.scan(TableName=table_name)
+
+with ThreadPoolExecutor(max_workers=10) as executor:
+    futures = [executor.submit(scan_items, table) for table in tables]
+    results = [f.result() for f in futures]
+```
+
+### 原因3：サービスのデフォルトレート制限を超過
+
+**なぜ発生するか**：CloudWatch、DynamoDB、Lambda などのサービスには初期状態でレート制限が設定されており、アプリケーションの負荷増加で制限を超える場合がある。
+
+Before（エラーが起きる設定）：
+```bash
+# CloudWatchでは初期状態で1秒あたり最大100 Put操作
+aws cloudwatch put-metric-data \
+  --namespace "CustomApp" \
+  --metric-name RequestCount \
+  --value 1
+# これを大量に繰り返すと429が発生
+```
+
+After（修正後：リクエスト制限の引き上げ）：
+```bash
+# AWS Management Consoleで[Service Quotas]を開く
+# または AWS CLI で確認・引き上げ
+aws service-quotas list-service-quotas \
+  --service-code cloudwatch \
+  --query 'ServiceQuotas[?MetricName==`PutMetricDataRequestCount`]'
+
+# サービスクォータの引き上げをリクエスト
+aws service-quotas request-service-quota-increase \
+  --service-code cloudwatch \
+  --quota-code L-5E141212 \
+  --desired-value 1000
+```
+
+### 原因4：エクスポーネンシャルバックオフの未実装
+
+**なぜ発生するか**：エラーが発生した際に即座にリトライすると、API が過負荷状態で再度拒否される可能性が高まるため。
+
+Before（エラーが起きるコード）：
+```python
+import boto3
+
+ec2 = boto3.client('ec2')
+
+# エラーが発生したら即座にリトライ
+for attempt in range(5):
+    try:
+        response = ec2.describe_instances()
+        break
+    except Exception as e:
+        if attempt == 4:
+            raise
+        time.sleep(1)  # 固定間隔のリトライ
+```
+
+After（修正後）：
+```python
+import boto3
+import time
+
+ec2 = boto3.client('ec2')
+
+# エクスポーネンシャルバックオフでリトライ
+for attempt in range(5):
+    try:
+        response = ec2.describe_instances()
+        break
+    except Exception as e:
+        if attempt == 4:
+            raise
+        wait_time = 2 ** attempt  # 1秒→2秒→4秒→8秒→16秒
+        time.sleep(wait_time)
+```
+
+## ツール固有の注意点
+
+**API Gateway**：ステージレベルでのスロットル設定が原因となりやすい。バーストリクエストと定常リクエスト レート の両方の設定を確認し、必要に応じて AWS Management Console または CloudFormation で引き上げてください。
+
+**DynamoDB**：オンデマンド課金モデルを使用している場合でも、初期スパイク期間中は 429 が返されることがあります。DynamoDB Accelerator（DAX）のキャッシュを導入することで、読み取りリクエストの頻度を削減できます。
+
+**Lambda**：同時実行数制限（Concurrency Limit）に達すると、関数呼び出しが拒否されます。CloudWatch メトリクス「Throttles」を監視し、必要に応じて Reserved Concurrency を設定してください。
+
+**S3**：従来のパーティション設計では、オブジェクトキーのプレフィックスが同一の場合レート制限が厳しくなります。キーの先頭にランダム文字列を追加してパーティションを分散させると、高スループットを実現できます。
+
+## それでも解決しない場合
+
+**CloudWatch ログの確認**：AWS CloudTrail を有効化し、API 呼び出しのタイムスタンプと失敗パターンを分析してください。Service Quotas ダッシュボードで現在のクォータ使用状況をリアルタイム監視できます。
+
+**AWS サポートへの相談**：本番環境で継続的に 429 エラーが発生する場合、AWS Support（Business/Enterprise プラン）に連絡し、サービスクォータの永続的な引き上げをリクエストしてください。
+
+**公式リソース**：[AWS API リファレンス - エラーレスポンス](https://docs.aws.amazon.com/ja_jp/general/latest/gr/error-handling.html)、[Service Quotas ユーザーガイド](https://docs.aws.amazon.com/ja_jp/servicequotas/latest/userguide/)を参照し、対象サービスの具体的な制限値を確認してください。
+
+---
+
+*免責事項：本記事の内容は、執筆時点の公開情報をもとに作成したものです。ソフトウェアの仕様は予告なく変更されることがあります。最新の情報は各ツールの公式サポートページをご確認ください。本記事の情報を利用した結果生じたいかなる損害についても、著者および運営者は責任を負いかねます。*

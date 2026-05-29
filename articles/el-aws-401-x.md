@@ -1,0 +1,231 @@
+---
+title: "AWS の 401 エラー：原因と解決策"
+emoji: "☁️"
+type: "tech"
+topics: ["aws", "error"]
+published: true
+---
+
+## エラーの概要
+
+AWS で 401 エラーが返される場合、リクエストに含まれる認証情報が無効であることを示しています。AWS API、SDK、CLI のいずれかを使用する際に、アクセスキー、シークレットアクセスキー、セッショントークン、または IAM ロールの認証情報が不正または期限切れの状態で送信されると発生します。このエラーは認証層での問題であり、比較的簡単に解決できるケースがほとんどです。
+
+## 実際のエラーメッセージ例
+
+AWS CLI を使用した場合：
+
+```bash
+$ aws s3 ls
+An error occurred (InvalidAccessKeyId.NotFound) when calling the ListBuckets operation: The AWS Access Key Id you provided does not exist in our records.
+```
+
+AWS SDK（Python）での JSON レスポンス例：
+
+```json
+{
+  "Error": {
+    "Code": "UnrecognizedClientException",
+    "Message": "The security token included in the request is invalid"
+  }
+}
+```
+
+API Gateway 経由での呼び出しでのエラー：
+
+```bash
+HTTP/1.1 401 Unauthorized
+{
+  "message": "Unauthorized"
+}
+```
+
+## よくある原因と解決手順
+
+### 原因1：アクセスキーが無効または存在しない
+
+AWS IAM ユーザーのアクセスキーが削除されたり、誤入力されたりしている場合に発生します。特に手動で環境変数やConfigファイルに設定した場合は打ち間違いが多いです。
+
+**Before（エラーが起きるコマンド）：**
+
+```bash
+export AWS_ACCESS_KEY_ID="AKIAIOSFODNN7EXAMPLE_WRONG"
+export AWS_SECRET_ACCESS_KEY="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+aws ec2 describe-instances
+```
+
+**After（修正後）：**
+
+```bash
+# IAM コンソールで現在のアクセスキーを確認
+# または新しいアクセスキーを生成してから設定
+export AWS_ACCESS_KEY_ID="AKIAIOSFODNN7EXAMPLE"
+export AWS_SECRET_ACCESS_KEY="wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY"
+aws ec2 describe-instances
+```
+
+確認手順は以下の通りです。AWS マネジメントコンソールで IAM → ユーザー → セキュリティ認証情報タブ を開き、アクセスキーが有効（Active）な状態であることを確認してください。無効な場合は新しいアクセスキーを生成する必要があります。
+
+### 原因2：セッショントークンの有効期限切れ
+
+AssumeRole や一時的な認証情報を使用している場合、セッショントークンには有効期限があります（デフォルト 1 時間）。時間が経過すると 401 エラーが発生します。
+
+**Before（トークン期限切れの状態）：**
+
+```python
+import boto3
+from datetime import datetime
+
+# 1時間前に取得したセッション認証情報を使用
+session_token = "AQoDYXdzEJr...(expired)"
+client = boto3.client(
+    's3',
+    aws_access_key_id='ASIAJ...',
+    aws_secret_access_key='...',
+    aws_session_token=session_token
+)
+response = client.list_buckets()  # 401 エラー
+```
+
+**After（トークンを再取得）：**
+
+```python
+import boto3
+
+# IAM ロールを持つ EC2 インスタンスまたは ECS タスクでは自動更新される
+# または AssumeRole を再実行してトークンを更新
+sts_client = boto3.client('sts')
+assumed_role = sts_client.assume_role(
+    RoleArn='arn:aws:iam::<account-id>:role/<role-name>',
+    RoleSessionName='my-session'
+)
+
+credentials = assumed_role['Credentials']
+client = boto3.client(
+    's3',
+    aws_access_key_id=credentials['AccessKeyId'],
+    aws_secret_access_key=credentials['SecretAccessKey'],
+    aws_session_token=credentials['SessionToken']
+)
+response = client.list_buckets()  # 成功
+```
+
+セッション認証情報の有効期限は `credentials['Expiration']` で確認できます。定期的に AssumeRole を再実行して新しいトークンを取得するか、IAM ロール付きの EC2・ECS リソースで実行する場合は自動更新に任せてください。
+
+### 原因3：IAM ポリシーが適切に設定されていない
+
+認証情報自体は有効でも、実行しようとしている操作に対する IAM ポリシーが不足している場合があります。この場合でも 401 エラーが返される（より正確には 403 Forbidden との区別が曖昧）ことがあります。
+
+**Before（権限不足のポリシー）：**
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::my-bucket/public/*"
+    }
+  ]
+}
+```
+
+上記のポリシーで `s3:ListBucket` を実行しようとすると 401 に近い扱いになります。
+
+**After（必要な操作を許可）：**
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:ListBucket",
+        "s3:GetObject"
+      ],
+      "Resource": [
+        "arn:aws:s3:::my-bucket",
+        "arn:aws:s3:::my-bucket/*"
+      ]
+    }
+  ]
+}
+```
+
+AWS ポリシーシミュレーター（IAM コンソール → ユーザー/ロール選択 → ポリシーシミュレーター）を使用して、実際の操作が許可されているか事前に確認できます。
+
+### 原因4：AWS CLI 設定ファイルの破損または不完全な設定
+
+`~/.aws/credentials` や `~/.aws/config` ファイルが不正な形式か、必須フィールドが不足している場合があります。
+
+**Before（不完全な credentials ファイル）：**
+
+```ini
+[default]
+aws_access_key_id = AKIAIOSFODNN7EXAMPLE
+# aws_secret_access_key が記載されていない
+```
+
+**After（正しい形式）：**
+
+```ini
+[default]
+aws_access_key_id = AKIAIOSFODNN7EXAMPLE
+aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+region = ap-northeast-1
+```
+
+設定ファイルの形式を確認するには、以下のコマンドで現在の設定を表示できます：
+
+```bash
+aws configure list
+aws sts get-caller-identity  # 認証情報が有効かテスト
+```
+
+## AWS ツール固有の注意点
+
+**API Gateway の 401 エラー：**
+API Gateway に IAM 認証を設定している場合、リクエストに `Authorization` ヘッダーが正しく含まれていない、または署名が無効な可能性があります。AWS CLI や SDK を使用すると自動で署名されますが、curl や外部ツール使用時は AWS Signature Version 4 で手動署名が必要です。
+
+**Cognito ユーザープール認証の場合：**
+OAuth 2.0 または OpenID Connect の ID トークン検証で 401 が発生する場合、トークンの有効期限切れやクライアント ID の不一致が原因です。`aws cognito-idp initiate-auth` でトークンを再取得するか、リフレッシュトークンで更新してください。
+
+**Lambda 実行時の認証情報：**
+EC2 や ECS 内の Lambda 関数から AWS リソースにアクセスする場合、IAM 実行ロール（Execution Role）に必要なポリシーが付与されていることを確認してください。ロールは Lambda 関数作成時に指定される必要があります。
+
+**CloudFormation やスタック操作：**
+IAM ユーザーが CloudFormation スタックを作成・更新する場合、そのユーザーに `cloudformation:CreateStack`、`iam:PassRole` などのポリシーが必要です。不足していると 401 ではなく 403 Forbidden になることもあります。
+
+## それでも解決しない場合
+
+**AWS CLI デバッグログの確認：**
+
+```bash
+aws s3 ls --debug 2>&1 | grep -i "authorization\|credential"
+```
+
+このコマンドで認証情報の送信状況を詳しく確認できます。
+
+**CloudTrail でリクエスト失敗の詳細を確認：**
+AWS マネジメントコンソールの CloudTrail サービスで、失敗した API コール（errorCode: "InvalidAccessKeyId" など）の詳細ログを確認してください。リージョンやソース IP アドレスなどの情報が記録されています。
+
+**STS エンドポイントの動作確認：**
+
+```bash
+aws sts get-caller-identity --profile <your-profile>
+```
+
+このコマンドで成功すれば、基本的な認証情報は有効です。失敗する場合は認証情報そのものが無効です。
+
+**公式ドキュメント参照：**
+- AWS SDK トラブルシューティング: https://docs.aws.amazon.com/ja_jp/sdkref/latest/guide/troubleshooting.html
+- IAM トラブルシューティング: https://docs.aws.amazon.com/ja_jp/IAM/latest/UserGuide/troubleshoot_general.html
+- API Gateway 認証: https://docs.aws.amazon.com/ja_jp/apigateway/latest/developerguide/api-gateway-authentication-and-access-control.html
+
+**GitHub Issues や AWS Support：**
+特定のサービス（例えば boto3）で一貫して 401 が返される場合は、該当リポジトリの GitHub Issues で同様の報告がないか検索してください。解決策が記載されていることもあります。個別のアカウント問題の場合は AWS Support に問い合わせることをお勧めします。
+
+---
+
+*免責事項：本記事の内容は、執筆時点の公開情報をもとに作成したものです。ソフトウェアの仕様は予告なく変更されることがあります。最新の情報は各ツールの公式サポートページをご確認ください。本記事の情報を利用した結果生じたいかなる損害についても、著者および運営者は責任を負いかねます。*
