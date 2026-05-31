@@ -6,7 +6,7 @@ topics: ["stripe", "error"]
 published: true
 ---
 
-Stripeの402エラーは「Payment Required」を意味し、決済処理が失敗したときに返されるHTTPステータスコードです。カード拒否、残高不足、不正利用の疑い、または3Dセキュア認証の失敗など、支払い側の問題で決済が完了できない状態を示しています。このエラーが発生した場合、決済データ自体は失われていませんが、トランザクションは成功していません。
+# Stripeの402エラーは「Payment Required」を意味し、決済処理が失敗したときに返されるHTTPステータスコードです。カード拒否、残高不足、不正利用の疑い、または3Dセキュア認証の失敗など、支払い側の問題で決済が完了できない状態を示しています。このエラーが発生した場合、決済データ自体は失われていませんが、トランザクションは成功していません。
 
 ## 実際のエラーメッセージ例
 
@@ -38,21 +38,7 @@ Stripeの402エラーは「Payment Required」を意味し、決済処理が失�
 
 カード番号、有効期限、CVCの入力に誤りがあるか、カード自体が既に有効期限を迎えている場合、Stripeは決済を拒否します。
 
-**Before（エラーが起きるコード）:**
-```javascript
-const payment = await stripe.confirmCardPayment(clientSecret, {
-  payment_method: {
-    card: {
-      number: '4242424242424241', // 最後の桁が誤り
-      exp_month: 12,
-      exp_year: 2023, // 既に期限切れ
-      cvc: '999'
-    }
-  }
-});
-```
-
-**After（修正後）:**
+**修正例：**
 ```javascript
 const payment = await stripe.confirmCardPayment(clientSecret, {
   payment_method: {
@@ -70,21 +56,7 @@ const payment = await stripe.confirmCardPayment(clientSecret, {
 
 カード会社の判断で決済がブロックされることがあります。金額が大きい、カード利用国と異なる国からのアクセス、利用限度額超過などが理由として考えられます。
 
-**Before（エラーが起きるコード）:**
-```python
-import stripe
-
-stripe.api_key = "sk_live_<your-secret-key>"
-
-charge = stripe.Charge.create(
-  amount=999999,  # 異常に大きい金額
-  currency="jpy",
-  source="tok_visa",
-  description="High-risk transaction"
-)
-```
-
-**After（修正後）:**
+**修正例：**
 ```python
 import stripe
 
@@ -102,22 +74,9 @@ charge = stripe.Charge.create(
 
 ### 原因3：3Dセキュア認証の失敗または未完了
 
-3Dセキュア認証が必須の場合、`off_session` パラメーターの設定ミスや認証フローの不完全な実装によって402エラーが発生します。
+3Dセキュア認証（本人認証サービス）が必須の場合、認証フローの不完全な実装によって402エラーが発生します。
 
-**Before（エラーが起きるコード）:**
-```javascript
-const {paymentIntent, error} = await stripe.confirmCardPayment(
-  clientSecret,
-  {
-    payment_method: {
-      card: cardElement
-    }
-    // 3D Secureの設定を指定していない
-  }
-);
-```
-
-**After（修正後）:**
+**修正例：**
 ```javascript
 const {paymentIntent, error} = await stripe.confirmCardPayment(
   clientSecret,
@@ -130,7 +89,7 @@ const {paymentIntent, error} = await stripe.confirmCardPayment(
     }
   },
   {
-    handleActions: true  // 3D Secureチャレンジを自動処理
+    handleActions: true  // 3Dセキュアチャレンジを自動処理
   }
 );
 ```
@@ -139,15 +98,7 @@ const {paymentIntent, error} = await stripe.confirmCardPayment(
 
 非同期処理でPaymentIntentの最終ステータスを確認する前に決済リクエストを再送信すると、重複処理が発生して402エラーになることがあります。
 
-**Before（エラーが起きるコード）:**
-```python
-# 同じPaymentIntentで複数回confirmを呼び出し
-intent = stripe.PaymentIntent.retrieve(pi_id)
-intent.confirm()  # 1回目
-intent.confirm()  # 2回目でエラー
-```
-
-**After（修正後）:**
+**修正例：**
 ```python
 # PaymentIntentのステータス確認後、必要な場合のみ確認
 intent = stripe.PaymentIntent.retrieve(pi_id)
