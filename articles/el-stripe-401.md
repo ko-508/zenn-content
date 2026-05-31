@@ -8,7 +8,7 @@ published: true
 
 ## エラーの概要
 
-Stripe API から返される 401（Unauthorized）エラーは、リクエストに含まれる認証情報（APIキーまたはアクセストークン）が無効・期限切れ・形式不正であることを示します。Stripe では認証なしにはいかなる API 呼び出しも実行できないため、開発環境と本番環境を問わず頻繁に発生するエラーです。データが消失することはありませんが、決済処理が停止するため迅速な対応が必要です。
+Stripe API から返される 401（Unauthorized）エラーは、リクエストに含まれる認証情報（API キーまたはアクセストークン）が無効・期限切れ・形式不正であることを示します。Stripe では認証なしにはいかなる API 呼び出しも実行できないため、開発環境と本番環境を問わず頻繁に発生するエラーです。データが消失することはありませんが、決済処理が停止するため迅速な対応が必要です。
 
 ## 実際のエラーメッセージ例
 
@@ -39,7 +39,7 @@ curl https://api.stripe.com/v1/charges \
 
 Stripe では `sk_test_` で始まるテスト用キーと `sk_live_` で始まる本番用キーが別々に発行されます。本番環境のコードでテスト用キーを使用すると 401 エラーになります。
 
-Before：
+**Before（エラーが起きるコード）：**
 ```javascript
 const stripe = require('stripe')('sk_test_xxxxx'); // テスト用キー
 
@@ -50,7 +50,7 @@ const charge = await stripe.charges.create({
 });
 ```
 
-After：
+**After（修正後）：**
 ```javascript
 // 環境変数から適切なキーを読み込む
 const apiKey = process.env.NODE_ENV === 'production' 
@@ -69,7 +69,7 @@ const charge = await stripe.charges.create({
 
 Stripe には 2 種類のキーが存在します。サーバー側では必ずシークレットキー（`sk_live_` または `sk_test_`）を使用し、公開キー（`pk_live_` または `pk_test_`）はクライアント側のみで使用します。
 
-Before：
+**Before（エラーが起きるコード）：**
 ```python
 import stripe
 
@@ -83,10 +83,10 @@ try:
         source="tok_visa"
     )
 except stripe.error.AuthenticationError as e:
-    print("401 エラー:", e)
+    print("認証エラー:", e)
 ```
 
-After：
+**After（修正後）：**
 ```python
 import stripe
 
@@ -107,7 +107,7 @@ except stripe.error.AuthenticationError as e:
 
 API キーをコピペする際に、誤って前後に空白文字やタブが含まれたり、キーの一部が欠落していたりすると 401 エラーになります。
 
-Before：
+**Before（エラーが起きるコード）：**
 ```bash
 # キーの後ろに余計なスペースやタブが含まれている
 API_KEY="sk_test_xxxxx " 
@@ -119,7 +119,7 @@ curl https://api.stripe.com/v1/charges \
 # → 401 エラー
 ```
 
-After：
+**After（修正後）：**
 ```bash
 # 環境変数にキーを設定する際、前後の空白を削除
 API_KEY=$(echo "sk_test_xxxxx" | xargs)
@@ -132,9 +132,9 @@ curl https://api.stripe.com/v1/charges \
 
 **原因4：アクセストークンの有効期限が切れている**
 
-OAuth を使用して Stripe にアクセス権を委譲している場合、アクセストークンには有効期限があります。期限切れのトークンで API リクエストを送信すると 401 エラーになります。
+OAuth（第三者認可プロトコル）を使用して Stripe にアクセス権を委譲している場合、アクセストークンには有効期限があります。期限切れのトークンで API リクエストを送信すると 401 エラーになります。
 
-Before：
+**Before（エラーが起きるコード）：**
 ```javascript
 // 古いトークンをそのまま使用
 const accessToken = storedToken; // 数ヶ月前に取得したトークン
@@ -148,7 +148,7 @@ const response = await fetch('https://api.stripe.com/v1/charges', {
 });
 ```
 
-After：
+**After（修正後）：**
 ```javascript
 // トークンの有効期限をチェックし、必要に応じてリフレッシュ
 if (isTokenExpired(storedToken)) {
@@ -166,9 +166,9 @@ const response = await fetch('https://api.stripe.com/v1/charges', {
 
 ## Stripe 固有の注意点
 
-**API キーローテーション：** Stripe ダッシュボードで API キーの権限を制限することが可能です。制限されたキーで全権限が必要な操作（チャージ作成など）を実行すると 401 エラーになります。ダッシュボードの「開発者」→「API キー」セクションで、各キーの権限スコープを確認してください。
+**API キーの権限制限：** Stripe ダッシュボードで API キーの権限を制限することができます。制限されたキーで全権限が必要な操作（チャージ作成など）を実行すると 401 エラーになります。ダッシュボードの「開発者」→「API キー」セクションで、各キーの権限スコープ（アクセス範囲）を確認してください。
 
-**Webhook 署名検証：** Webhook エンドポイントを呼び出す際、Stripe は `Stripe-Signature` ヘッダーで署名を送信します。このヘッダーが不正な場合も認証エラーとして扱われることがあります。Webhook の署名検証には必ず Stripe 公式ライブラリの `verifyWebhookSignature()` メソッドを使用してください。
+**Webhook 署名検証：** Webhook エンドポイント（外部からの呼び出し受け入れ口）を呼び出す際、Stripe は `Stripe-Signature` ヘッダーで署名を送信します。このヘッダーが不正な場合も認証エラーとして扱われることがあります。Webhook の署名検証には必ず Stripe 公式ライブラリの `verifyWebhookSignature()` メソッドを使用してください。
 
 **Connected Account（Stripe Connect）：** 複数の Stripe アカウントを管理する場合、リクエストヘッダーに正しい `Stripe-Account` ID を指定しないと 401 エラーが発生します。
 
@@ -178,7 +178,7 @@ curl https://api.stripe.com/v1/charges \
   -u sk_test_xxxxx:
 ```
 
-**テスト用キーの制限：** テスト環境のテスト用キー（`sk_test_`）では、本番環境でのみ利用可能な機能（例：実際の決済処理）は実行できない場合があります。
+**テスト用キーの機能制限：** テスト環境のテスト用キー（`sk_test_`）では、本番環境でのみ利用可能な機能の実行が制限される場合があります。
 
 ## それでも解決しない場合
 
@@ -192,7 +192,7 @@ DEBUG=stripe:* node your_script.js
 
 **Step 2：API キーの妥当性を確認する**
 
-Stripe ダッシュボードにログインし、「開発者」→「API キー」から実際に発行されているキーのリスト確認してください。コピペしたキーが有効なキーと完全一致しているか確認します。
+Stripe ダッシュボードにログインし、「開発者」→「API キー」から実際に発行されているキーのリストを確認してください。コピペしたキーが有効なキーと完全一致しているか確認します。
 
 **Step 3：リクエストのヘッダーを確認する**
 

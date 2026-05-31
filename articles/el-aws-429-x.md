@@ -37,7 +37,7 @@ when calling the GetObject operation: Rate exceeded
 
 **なぜ発生するか**：ループ内で連続的に API を呼び出す場合、AWS が許容する 1 秒あたりのリクエスト数を瞬間的に超えるため。
 
-Before（エラーが起きるコード）：
+**Before（エラーが起きるコード）：**
 ```python
 import boto3
 
@@ -49,7 +49,7 @@ for key in object_keys:
     process_data(response)
 ```
 
-After（修正後）：
+**After（修正後）：**
 ```python
 import boto3
 import time
@@ -67,7 +67,7 @@ for key in object_keys:
 
 **なぜ発生するか**：並列処理で複数スレッドやプロセスが同時に同じ AWS API を呼び出すと、合計リクエスト数が急増して制限を超えるため。
 
-Before（エラーが起きるコード）：
+**Before（エラーが起きるコード）：**
 ```python
 from concurrent.futures import ThreadPoolExecutor
 import boto3
@@ -83,7 +83,7 @@ with ThreadPoolExecutor(max_workers=10) as executor:
     results = [f.result() for f in futures]
 ```
 
-After（修正後）：
+**After（修正後）：**
 ```python
 from concurrent.futures import ThreadPoolExecutor
 import boto3
@@ -107,7 +107,7 @@ with ThreadPoolExecutor(max_workers=10) as executor:
 
 **なぜ発生するか**：CloudWatch、DynamoDB、Lambda などのサービスには初期状態でレート制限が設定されており、アプリケーションの負荷増加で制限を超える場合がある。
 
-Before（エラーが起きる設定）：
+**Before（エラーが起きる設定）：**
 ```bash
 # CloudWatchでは初期状態で1秒あたり最大100 Put操作
 aws cloudwatch put-metric-data \
@@ -117,7 +117,7 @@ aws cloudwatch put-metric-data \
 # これを大量に繰り返すと429が発生
 ```
 
-After（修正後：リクエスト制限の引き上げ）：
+**After（修正後：リクエスト制限の引き上げ）：**
 ```bash
 # AWS Management Consoleで[Service Quotas]を開く
 # または AWS CLI で確認・引き上げ
@@ -136,7 +136,7 @@ aws service-quotas request-service-quota-increase \
 
 **なぜ発生するか**：エラーが発生した際に即座にリトライすると、API が過負荷状態で再度拒否される可能性が高まるため。
 
-Before（エラーが起きるコード）：
+**Before（エラーが起きるコード）：**
 ```python
 import boto3
 
@@ -153,7 +153,7 @@ for attempt in range(5):
         time.sleep(1)  # 固定間隔のリトライ
 ```
 
-After（修正後）：
+**After（修正後）：**
 ```python
 import boto3
 import time

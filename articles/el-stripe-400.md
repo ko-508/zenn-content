@@ -40,7 +40,7 @@ Stripe APIへのリクエストが**400 Bad Request**を返す場合、リクエ
 
 なぜ発生するか：Stripe APIの各エンドポイントには必須パラメータが定義されており、これらが不足している、または期待される型と異なる型で送信されると400エラーが返されます。例えば、決済作成時に`amount`（整数・セント単位）が文字列で送信された場合などです。
 
-Before（エラーが起きるコード）:
+**Before（エラーが起きるコード）:**
 ```python
 import stripe
 
@@ -54,7 +54,7 @@ payment_intent = stripe.PaymentIntent.create(
 )
 ```
 
-After（修正後）:
+**After（修正後）:**
 ```python
 import stripe
 
@@ -72,7 +72,7 @@ payment_intent = stripe.PaymentIntent.create(
 
 なぜ発生するか：Stripeは対応する通貨コード（`jpy`、`usd`等）のみを受け入れます。また、金額は通貨によって有効な範囲が決まっており、JPYは通常1円以上の整数、USDは1セント以上である必要があります。0円や負の金額を指定すると400エラーになります。
 
-Before（エラーが起きるコード）:
+**Before（エラーが起きるコード）:**
 ```javascript
 const stripe = require('stripe')('<your-api-key>');
 
@@ -84,7 +84,7 @@ stripe.paymentIntents.create({
 });
 ```
 
-After（修正後）:
+**After（修正後）:**
 ```javascript
 const stripe = require('stripe')('<your-api-key>');
 
@@ -100,7 +100,7 @@ stripe.paymentIntents.create({
 
 なぜ発生するか：StripeのAPIは特定のパラメータ組み合わせを認めていません。例えば、決済作成時に同時に複数の決済方法を指定したり、既に確定済みのPaymentIntentに対して金額を変更しようとしたりすると、相互に矛盾するパラメータ組み合わせとして400エラーが返されます。
 
-Before（エラーが起きるコード）:
+**Before（エラーが起きるコード）:**
 ```python
 import stripe
 
@@ -115,7 +115,7 @@ payment_intent = stripe.PaymentIntent.create(
 )
 ```
 
-After（修正後）:
+**After（修正後）:**
 ```python
 import stripe
 

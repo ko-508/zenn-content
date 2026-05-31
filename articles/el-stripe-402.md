@@ -6,8 +6,6 @@ topics: ["stripe", "error"]
 published: true
 ---
 
-## エラーの概要
-
 Stripeの402エラーは「Payment Required」を意味し、決済処理が失敗したときに返されるHTTPステータスコードです。カード拒否、残高不足、不正利用の疑い、または3Dセキュア認証の失敗など、支払い側の問題で決済が完了できない状態を示しています。このエラーが発生した場合、決済データ自体は失われていませんが、トランザクションは成功していません。
 
 ## 実際のエラーメッセージ例
@@ -70,7 +68,7 @@ const payment = await stripe.confirmCardPayment(clientSecret, {
 
 ### 原因2：カード会社による拒否（不正利用判定、残高不足など）
 
-カード会社の判断で決済がブロックされる場合があります。金額が大きい、カード利用国と異なる国からのアクセス、利用限度額超過などが理由として考えられます。
+カード会社の判断で決済がブロックされることがあります。金額が大きい、カード利用国と異なる国からのアクセス、利用限度額超過などが理由として考えられます。
 
 **Before（エラーが起きるコード）:**
 ```python
@@ -104,7 +102,7 @@ charge = stripe.Charge.create(
 
 ### 原因3：3Dセキュア認証の失敗または未完了
 
-3Dセキュア認証が必須の場合、`off_session` パラメータの設定ミスや認証フローの不完全な実装によって402エラーが発生します。
+3Dセキュア認証が必須の場合、`off_session` パラメーターの設定ミスや認証フローの不完全な実装によって402エラーが発生します。
 
 **Before（エラーが起きるコード）:**
 ```javascript
@@ -139,7 +137,7 @@ const {paymentIntent, error} = await stripe.confirmCardPayment(
 
 ### 原因4：PaymentIntentのステータス確認の遅延
 
-非同期処理でPaymentIntentの最終ステータスを確認する前に決済リクエストを再送信すると、重複処理が発生して402エラーになる場合があります。
+非同期処理でPaymentIntentの最終ステータスを確認する前に決済リクエストを再送信すると、重複処理が発生して402エラーになることがあります。
 
 **Before（エラーが起きるコード）:**
 ```python
@@ -169,7 +167,7 @@ elif intent.status == "succeeded":
 - `4242424242424242` - 決済成功
 - `4000000000000002` - card_declined（一般的な拒否）
 - `4000002500003155` - insufficient_funds（残高不足）
-- `4000002000000003` - requires_3d_secure（3D Secure認証必須）
+- `4000002000000003` - requires_3d_secure（3Dセキュア認証必須）
 
 ### decline_codeの確認
 
@@ -190,9 +188,9 @@ except stripe.error.CardError as e:
   # stolen_card, lost_card, insufficient_funds など
 ```
 
-### WebhookイベントのLost Transaction チェック
+### Webhookイベントのチェック
 
-決済処理が失敗しても、`charge.failed` イベントが webhook に送信されます。これを適切にハンドリングして、ユーザーに失敗理由を正確に伝えることが重要です。
+決済処理が失敗しても、`charge.failed` イベントが Webhook に送信されます。これを適切にハンドリングして、ユーザーに失敗理由を正確に伝えることが重要です。
 
 ```python
 @app.route('/webhook', methods=['POST'])
@@ -223,8 +221,8 @@ Stripe Dashboard の「Logs」セクションで API リクエスト・レスポ
 ### 公式ドキュメント参照
 
 - **Stripe エラーコード解説** - https://stripe.com/docs/error-codes（各エラーの詳細と対応方法）
-- **Payment Intent ガイド** - https://stripe.com/docs/payments/payment-intents（決済フロー全体の理解）
-- **3D Secure 実装ガイド** - https://stripe.com/docs/payments/3d-secure（強力認証の設定方法）
+- **PaymentIntent ガイド** - https://stripe.com/docs/payments/payment-intents（決済フロー全体の理解）
+- **3Dセキュア実装ガイド** - https://stripe.com/docs/payments/3d-secure（強力認証の設定方法）
 
 ### コミュニティと支援
 
