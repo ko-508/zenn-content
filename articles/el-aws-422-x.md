@@ -212,7 +212,7 @@ EventBridge にルールを追加する際、イベントパターンの JSON �
 
 CloudFormation テンプレートのエラー詳細は AWS CloudFormation コンソールの「Events」タブで確認できます。詳細なエラーメッセージが表示されるため、ここから原因を特定することが多いです。
 
-API Gateway 経由のエラーの場合、CloudWatch Logs で API のエクスecution ログを有効化し、詳細なリクエスト・レスポンス情報を確認してください。ログは次のコマンドで確認できます:
+API Gateway 経由のエラーの場合、CloudWatch Logs で API のexecution ログを有効化し、詳細なリクエスト・レスポンス情報を確認してください。ログは次のコマンドで確認できます:
 
 ```bash
 aws logs tail /aws/apigateway/<your-api-id> --follow

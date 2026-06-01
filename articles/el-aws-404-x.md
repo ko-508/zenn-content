@@ -22,7 +22,7 @@ S3 へのアクセス時のエラーレスポンス：
     <Key>nonexistent-file.txt</Key>
     <BucketName>my-bucket</BucketName>
     <RequestId>4TZ432A73F8A1A1A</RequestId>
-    <HostId>SlFydFBhMjMzMzM3L2ZpbGUuanNvbg==</HostId>
+    <HostId>SlFydFBhMjMzMzMzL2ZpbGUuanNvbg==</HostId>
 </Error>
 ```
 
@@ -53,7 +53,7 @@ AWS CLI でのエラーメッセージ：
 **Before（エラーが起きる例）：**
 
 ```bash
-# S3 バケト名が誤っている
+# S3 バケット名が誤っている
 aws s3 cp myfile.txt s3://my-backet/path/
 
 # Lambda 関数名が誤っている
@@ -63,7 +63,7 @@ aws lambda invoke --function-name MyLamda output.json
 **After（修正後）：**
 
 ```bash
-# 正しいバケト名を指定
+# 正しいバケット名を指定
 aws s3 cp myfile.txt s3://my-bucket/path/
 
 # 正しい関数名を指定（大文字小文字を確認）
@@ -133,10 +133,10 @@ aws dynamodb get-item \
 
 ### S3 でよくある 404 の原因
 
-S3 バケトポリシーでパブリックアクセスがブロックされている場合、バケトやオブジェクトが存在しても 404 が返されることがあります。これはセキュリティ上の理由から仕様通りの動作です。
+S3 バケットポリシーでパブリックアクセスがブロックされている場合、バケットやオブジェクトが存在しても 404 が返されることがあります。これはセキュリティ上の理由から仕様通りの動作です。
 
 ```bash
-# バケトが存在するか確認
+# バケットが存在するか確認
 aws s3api head-bucket --bucket my-bucket --region ap-northeast-1
 
 # オブジェクトが存在するか確認（IAM 権限が必要）
@@ -145,7 +145,7 @@ aws s3api head-object --bucket my-bucket --key path/to/file.txt
 
 ### API Gateway での 404 エラー
 
-API Gateway の ステージが正しく設定されていない、または リソースパスが定義されていない場合に 404 が返されます。
+API Gateway のステージが正しく設定されていない、またはリソースパスが定義されていない場合に 404 が返されます。
 
 ```bash
 # API ID とリソース ID を確認

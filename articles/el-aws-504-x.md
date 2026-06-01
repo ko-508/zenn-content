@@ -80,7 +80,7 @@ def lambda_handler(event, context):
 
 **Lambda コンソールでのタイムアウト設定変更**
 1. AWS Lambda コンソール → 関数を選択 → 設定タブ
-2. 一般設定 → タイムアウト を編集（1秒～900秒の範囲内で設定）
+2. 一般設定 → タイムアウトを編集（1秒～900秒の範囲内で設定）
 
 ### 原因2：バックエンド（EC2/ECS）が応答不可な状態
 
@@ -194,7 +194,7 @@ def worker_lambda_handler(event, context):
 
 **Application Load Balancer（ALB）**
 - デフォルトのアイドルタイムアウト：60秒
-- 設定で延長可能だが、クライアント側の接続タイムアウトも考慮が必要
+- 設定で延長可能ですが、クライアント側の接続タイムアウトも考慮が必要
 - AWS CLI で確認・変更：
 ```bash
 aws elbv2 describe-load-balancer-attributes \

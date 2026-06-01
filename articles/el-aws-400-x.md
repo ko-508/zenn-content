@@ -60,7 +60,7 @@ dynamodb = boto3.client('dynamodb')
 response = dynamodb.scan(TableName='<your-table-name>')
 ```
 
-### 原因2：ARN または リソース識別子の形式が誤っている
+### 原因2：ARN またはリソース識別子の形式が誤っている
 
 **なぜ発生するか**
 
@@ -176,7 +176,7 @@ CloudTrail ログを確認すると、AWS API に実際に送信されたリク�
 $ aws cloudtrail lookup-events --lookup-attributes AttributeKey=ResourceName,AttributeValue=<your-resource-name>
 ```
 
-**AWS SDKのデバッグログを有効化**
+**AWS SDK のデバッグログを有効化**
 
 Python boto3 の場合、ロギングレベルを DEBUG に設定してリクエストとレスポンスの詳細を確認します。
 

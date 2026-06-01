@@ -35,7 +35,7 @@ when calling the GetObject operation: Rate exceeded
 
 ### 原因1：API 呼び出し間隔の不足
 
-**なぜ発生するか**：ループ内で連続的に API を呼び出す場合、AWS が許容する 1 秒あたりのリクエスト数を瞬間的に超えるため。
+**なぜ発生するか**：ループ内で連続的に API を呼び出す場合、AWS が許容する 1 秒あたりのリクエスト数を瞬間的に超えるためです。
 
 **Before（エラーが起きるコード）：**
 ```python
@@ -65,7 +65,7 @@ for key in object_keys:
 
 ### 原因2：複数プロセス・スレッドからの同時呼び出し
 
-**なぜ発生するか**：並列処理で複数スレッドやプロセスが同時に同じ AWS API を呼び出すと、合計リクエスト数が急増して制限を超えるため。
+**なぜ発生するか**：並列処理で複数スレッドやプロセスが同時に同じ AWS API を呼び出すと、合計リクエスト数が急増して制限を超えるためです。
 
 **Before（エラーが起きるコード）：**
 ```python
@@ -105,7 +105,7 @@ with ThreadPoolExecutor(max_workers=10) as executor:
 
 ### 原因3：サービスのデフォルトレート制限を超過
 
-**なぜ発生するか**：CloudWatch、DynamoDB、Lambda などのサービスには初期状態でレート制限が設定されており、アプリケーションの負荷増加で制限を超える場合がある。
+**なぜ発生するか**：CloudWatch、DynamoDB、Lambda などのサービスには初期状態でレート制限が設定されており、アプリケーションの負荷増加で制限を超える場合があります。
 
 **Before（エラーが起きる設定）：**
 ```bash
@@ -119,7 +119,7 @@ aws cloudwatch put-metric-data \
 
 **After（修正後：リクエスト制限の引き上げ）：**
 ```bash
-# AWS Management Consoleで[Service Quotas]を開く
+# AWS Management Consoleで Service Quotas を開く
 # または AWS CLI で確認・引き上げ
 aws service-quotas list-service-quotas \
   --service-code cloudwatch \
@@ -134,7 +134,7 @@ aws service-quotas request-service-quota-increase \
 
 ### 原因4：エクスポーネンシャルバックオフの未実装
 
-**なぜ発生するか**：エラーが発生した際に即座にリトライすると、API が過負荷状態で再度拒否される可能性が高まるため。
+**なぜ発生するか**：エラーが発生した際に即座にリトライすると、API が過負荷状態で再度拒否される可能性が高まるためです。
 
 **Before（エラーが起きるコード）：**
 ```python
@@ -174,7 +174,7 @@ for attempt in range(5):
 
 ## ツール固有の注意点
 
-**API Gateway**：ステージレベルでのスロットル設定が原因となりやすい。バーストリクエストと定常リクエスト レート の両方の設定を確認し、必要に応じて AWS Management Console または CloudFormation で引き上げてください。
+**API Gateway**：ステージレベルでのスロットル設定が原因となりやすいです。バーストリクエストと定常リクエスト レート の両方の設定を確認し、必要に応じて AWS Management Console または CloudFormation で引き上げてください。
 
 **DynamoDB**：オンデマンド課金モデルを使用している場合でも、初期スパイク期間中は 429 が返されることがあります。DynamoDB Accelerator（DAX）のキャッシュを導入することで、読み取りリクエストの頻度を削減できます。
 

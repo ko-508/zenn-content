@@ -8,7 +8,7 @@ published: true
 
 ## エラーの概要
 
-Docker で 422 エラーが発生するのは、Docker API またはコンテナレジストリへのリクエストが構文的には正しいものの、含まれるデータが処理要件を満たしていない場合です。Docker Daemon、Docker Compose、レジストリ API との通信時にこのエラーが返される典型的なシナリオは、不正なイメージタグ指定、設定値の型違反、あるいは API スキーマの検証失敗です。
+Dockerで 422 エラーが発生するのは、Docker APIまたはコンテナレジストリへのリクエストが構文的には正しいものの、含まれるデータが処理要件を満たしていない場合です。Docker Daemon、Docker Compose、レジストリ APIとの通信時にこのエラーが返される典型的なシナリオは、不正なイメージタグ指定、設定値の型違反、あるいは APIスキーマの検証失敗です。
 
 ## 実際のエラーメッセージ例
 
@@ -34,7 +34,7 @@ Service 'web' has invalid value for ports: ports must be an integer or string
 
 ### 1. イメージタグの形式が不正
 
-Docker レジストリ API は RFC 6391 に基づいたタグ形式を要求します。許可されない文字（`@` や大文字の混在）が含まれている場合に 422 が返されます。
+Dockerレジストリ APIは RFC 6391 に基づいたタグ形式を要求します。許可されない文字（`@`や大文字の混在）が含まれている場合に 422 が返されます。
 
 **Before（エラーが起きる例）：**
 ```bash
@@ -52,7 +52,7 @@ docker push myregistry.example.com/app:v1.0.0
 
 ### 2. docker-compose.yml の設定値の型違反
 
-`ports`、`mem_limit`、`cpu_shares` など、数値型を期待するフィールドに文字列を指定するとバリデーション失敗で 422 が返されます。
+`ports`、`mem_limit`、`cpu_shares`など、数値型を期待するフィールドに文字列を指定するとバリデーション失敗で 422 が返されます。
 
 **Before（エラーが起きる例）：**
 ```yaml
@@ -78,7 +78,7 @@ services:
 
 ### 3. マニフェスト JSON の構造が不正
 
-Docker イメージをプッシュする際に、レイヤーのダイジェスト値が不正な形式である場合、レジストリが 422 で拒否します。
+Dockerイメージをプッシュする際に、レイヤーのダイジェスト値が不正な形式である場合、レジストリが 422 で拒否します。
 
 **Before（エラーが起きる例）：**
 ```bash
@@ -93,7 +93,7 @@ docker push myregistry.example.com/myapp:broken
 # イメージを再度ビルドしてプッシュ
 docker build -t myregistry.example.com/myapp:v1.0.0 .
 docker push myregistry.example.com/myapp:v1.0.0
-# 正規のダイジェスト形式で処理される
+# 正規のダイジェスト形式で処理されます
 ```
 
 ### 4. API リクエストのボディスキーマ不整合
@@ -123,7 +123,7 @@ curl -X POST http://localhost:2375/containers/create \
 
 ### Docker Compose バージョンと設定値の互換性
 
-`docker-compose.yml` で `version: '3.8'` を指定した場合、古い構文（`1.0` 時代の短縮ポート指定）は 422 で拒否されます。バージョンと設定内容の整合性を確認してください。
+`docker-compose.yml`で `version: '3.8'`を指定した場合、古い構文（`1.0`時代の短縮ポート指定）は 422 で拒否されます。バージョンと設定内容の整合性を確認してください。
 
 ### レジストリ認証後のプッシュ時エラー
 
@@ -140,7 +140,7 @@ docker image ls | grep myimage
 
 ### BuildKit キャッシュとダイジェスト値
 
-`DOCKER_BUILDKIT=1` を使用している場合、キャッシュレイヤーのダイジェスト不整合で 422 が発生することがあります。この場合は `--no-cache` フラグを使用してビルドを再実行してください。
+`DOCKER_BUILDKIT=1`を使用している場合、キャッシュレイヤーのダイジェスト不整合で 422 が発生することがあります。この場合は `--no-cache`フラグを使用してビルドを再実行してください。
 
 ```bash
 DOCKER_BUILDKIT=1 docker build --no-cache -t myapp:v1 .
@@ -166,13 +166,13 @@ curl -v --unix-socket /var/run/docker.sock \
 
 ### 公式ドキュメント参照
 
-Docker Compose 設定リファレンス（https://docs.docker.com/compose/compose-file/）で、各フィールドの型と制約を確認してください。API スキーマ検証エラーの場合は「Docker Engine API」ドキュメントの `POST /containers/create` セクションを参照します。
+Docker Compose 設定リファレンス（https://docs.docker.com/compose/compose-file/）で、各フィールドの型と制約を確認してください。API スキーマ検証エラーの場合は「Docker Engine API」ドキュメントの `POST /containers/create`セクションを参照します。
 
 ### 環境別の確認ポイント
 
-- **Private Registry 使用時**: レジストリの API バージョンを確認し、サポートされているイメージマニフェスト形式を検証します
-- **Kubernetes 経由でのデプロイ**: `imagePullPolicy` 設定とイメージレジストリの CORS 設定を確認します
-- **CI/CD パイプライン**: GitHub Actions や GitLab CI のアーティファクトストレージ設定を見直し、イメージダイジェストの計算ロジックをテストします
+- **Private Registry 使用時**: レジストリの APIバージョンを確認し、サポートされているイメージマニフェスト形式を検証します
+- **Kubernetes経由でのデプロイ**: `imagePullPolicy`設定とイメージレジストリの CORS設定を確認します
+- **CI/CDパイプライン**: GitHub Actions や GitLab CI のアーティファクトストレージ設定を見直し、イメージダイジェストの計算ロジックをテストします
 
 ---
 

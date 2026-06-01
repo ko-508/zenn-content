@@ -74,7 +74,7 @@ charge = stripe.Charge.create(
 
 ### 原因3：3Dセキュア認証の失敗または未完了
 
-3Dセキュア認証（本人認証サービス）が必須の場合、認証フローの不完全な実装によって402エラーが発生します。
+3Dセキュア（本人認証サービス）が必須の場合、認証フローの不完全な実装によって402エラーが発生します。
 
 **修正例：**
 ```javascript
@@ -141,7 +141,7 @@ except stripe.error.CardError as e:
 
 ### Webhookイベントのチェック
 
-決済処理が失敗しても、`charge.failed` イベントが Webhook に送信されます。これを適切にハンドリングして、ユーザーに失敗理由を正確に伝えることが重要です。
+決済処理が失敗しても、`charge.failed` イベントがWebhookに送信されます。これを適切にハンドリングして、ユーザーに失敗理由を正確に伝えることが重要です。
 
 ```python
 @app.route('/webhook', methods=['POST'])
@@ -162,11 +162,11 @@ def handle_webhook():
 
 ### ログ確認とデバッグ方法
 
-Stripe Dashboard の「Logs」セクションで API リクエスト・レスポンスの全詳細を確認できます。以下の情報を記録してください。
+Stripe Dashboardの「Logs」セクションでAPI リクエスト・レスポンスの全詳細を確認できます。以下の情報を記録してください。
 
 - **Request ID** - `req_` で始まる一意識別子
-- **Charge ID** - `ch_` で始まるチャージ ID
-- **PaymentIntent ID** - `pi_` で始まるペイメント ID
+- **Charge ID** - `ch_` で始まるチャージID
+- **PaymentIntent ID** - `pi_` で始まるペイメントID
 - **Decline Code** - `insufficient_funds` など具体的な拒否理由
 
 ### 公式ドキュメント参照

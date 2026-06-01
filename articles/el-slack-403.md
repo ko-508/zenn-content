@@ -1,17 +1,9 @@
 ---
-title: "slack_403"
-emoji: "🚫"
-type: "tech"
-topics: ["error"]
-published: true
----
-
-﻿---
 title: "Slack の 403 エラー：原因と解決策"
-date: 2026-05-27
-description: "Slack の 403 エラーの原因と解決策をわかりやすく解説します。"
-tags: ["Slack"]
-errorCode: "403"
+emoji: "💬"
+type: "tech"
+topics: ["slack", "error"]
+published: true
 ---
 
 ## Slack の 403 エラーの原因と解決方法

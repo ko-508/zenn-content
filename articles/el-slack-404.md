@@ -1,17 +1,9 @@
 ---
-title: "slack_404"
-emoji: "🚫"
-type: "tech"
-topics: ["error"]
-published: true
----
-
-﻿---
 title: "Slack の 404 エラー：原因と解決策"
-date: 2026-05-27
-description: "Slack の 404 エラーの原因と解決策をわかりやすく解説します。"
-tags: ["Slack"]
-errorCode: "404"
+emoji: "💬"
+type: "tech"
+topics: ["slack", "error"]
+published: true
 ---
 
 ## Slack 404 エラーの原因と解決方法
