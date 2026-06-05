@@ -127,17 +127,17 @@ CREATE POLICY "Users can access own profile"
   USING (auth.uid() = user_id);  -- この条件が必須
 ```
 
-### 原因3：service_role key が必要な管理操作を anon key で実行している
+### 原因3：service_role キーが必要な管理操作を anon キーで実行している
 
-Supabase では 2 種類の API キーが存在します。`anon`（匿名キー）はフロントエンドで使用し、RLS ポリシーの制約を受けます。一方、`service_role`（サービスロールキー）はバックエンド限定で、RLS をバイパスして操作できます。管理者権限の操作（例：ユーザーの一括削除、ポリシーを無視したデータ更新）を anon key で実行しようとすると 403 エラーになります。
+Supabase では 2 種類の API キーが存在します。`anon`（匿名キー）はフロントエンドで使用し、RLS ポリシーの制約を受けます。一方、`service_role`（サービスロールキー）はバックエンド限定で、RLS をバイパスして操作できます。管理者権限の操作（例：ユーザーの一括削除、ポリシーを無視したデータ更新）を anon キーで実行しようとすると 403 エラーになります。
 
 **Before（エラーが起きるコード）：**
 
 ```javascript
-// フロントエンドで anon key を使用してサーバー側の操作を試みる
+// フロントエンドで anon キーを使用してサーバー側の操作を試みる
 const supabase = createClient(
   process.env.REACT_APP_SUPABASE_URL,
-  process.env.REACT_APP_SUPABASE_ANON_KEY  // anon key
+  process.env.REACT_APP_SUPABASE_ANON_KEY  // anon キー
 );
 
 // ユーザーの管理者フラグを強制的に更新しようとする（RLSでブロック）
@@ -151,12 +151,12 @@ const { error } = await supabase
 **After（修正後）：**
 
 ```javascript
-// バックエンド（Node.js / Python 等）で service_role key を使用
+// バックエンド（Node.js / Python 等）で service_role キーを使用
 import { createClient } from '@supabase/supabase-js';
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY  // service_role key（機密情報）
+  process.env.SUPABASE_SERVICE_ROLE_KEY  // service_role キー（機密情報）
 );
 
 // サーバー側なら RLS をバイパスして操作可能
@@ -187,7 +187,7 @@ Supabase ダッシュボードから以下の手順でポリシーを確認で�
 
 **認証トークンの有効期限**
 
-Supabase の認証トークンにも有効期限があります。トークンが期限切れの場合、リクエストが匿名状態として扱われ、RLS ポリシーで保護されたテーブルへのアクセスが拒否されることがあります。トークンの自動リフレッシュが設定されているか確認してください。
+Supabase の認証トークンには有効期限があります。トークンが期限切れの場合、リクエストが匿名状態として扱われ、RLS ポリシーで保護されたテーブルへのアクセスが拒否されることがあります。トークンの自動リフレッシュが設定されているか確認してください。
 
 ```javascript
 // トークンが期限切れでないか確認
@@ -225,7 +225,7 @@ WHERE tablename = 'your_table_name';
 
 **バックアップとしての確認**
 
-- フロントエンドで使用している API キーが本当に `anon key` か `service_role key` か再確認
+- フロントエンドで使用している API キーが本当に `anon キー` か `service_role キー` か再確認
 - `auth.uid()` の代わりに硬定値でテストし、ポリシー評価自体は正常に機能しているか検証
 - 公式ドキュメント（https://supabase.com/docs/guides/auth/row-level-security）を参照し、最新のベストプラクティスを確認
 
