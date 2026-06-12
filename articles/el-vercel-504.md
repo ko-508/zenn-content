@@ -48,7 +48,7 @@ Connection: close
 
 Vercelの無料Hobbyプランでは、サーバーレス関数の最大実行時間が10秒に制限されています。この時間内に処理が完了しないと自動的に504エラーが返されます。特に外部APIの呼び出しやデータベースアクセスが複数含まれる関数では、容易にこの上限に達する可能性があります。
 
-**Before（エラーが起きるコード）：**
+**修正前（エラーが起きるコード）：**
 
 ```javascript
 // api/getUserData.js
@@ -62,7 +62,7 @@ export default async function handler(req, res) {
 }
 ```
 
-**After（修正後）：**
+**修正後：**
 
 ```javascript
 // api/getUserData.js
@@ -84,7 +84,7 @@ export default async function handler(req, res) {
 
 外部サービスへのリクエストがハング状態に陥ると、関数全体が待機し続けて504に陥ります。特にネットワークが不安定な環境では、接続先が応答しなくなるケースが頻繁に発生します。
 
-**Before（エラーが起きるコード）：**
+**修正前（エラーが起きるコード）：**
 
 ```javascript
 // api/fetchUserProfile.js
@@ -99,7 +99,7 @@ export default async function handler(req, res) {
 }
 ```
 
-**After（修正後）：**
+**修正後：**
 
 ```javascript
 // api/fetchUserProfile.js
@@ -131,7 +131,7 @@ export default async function handler(req, res) {
 
 画像リサイズ、CSV解析、機械学習推論など、CPU集約的な処理を直接関数内で行うと、瞬く間にタイムアウトに達します。これらの処理は関数の責務外に切り出し、キューイングシステムで非同期実行するべきです。
 
-**Before（エラーが起きるコード）：**
+**修正前（エラーが起きるコード）：**
 
 ```javascript
 // api/processImage.js
@@ -150,7 +150,7 @@ export default async function handler(req, res) {
 }
 ```
 
-**After（修正後）：**
+**修正後：**
 
 ```javascript
 // api/processImage.js
