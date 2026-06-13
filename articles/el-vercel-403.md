@@ -78,6 +78,7 @@ vercel deploy
 # Vercel ダッシュボードから正しい値を確認して設定
 export VERCEL_ORG_ID=team_abc123
 export VERCEL_PROJECT_ID=prj_team_abc789  # 対応するプロジェクトID
+export VERCEL_TOKEN=<チームスコープのトークン>
 vercel deploy
 ```
 
