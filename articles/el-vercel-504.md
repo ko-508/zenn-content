@@ -6,13 +6,13 @@ topics: ["vercel", "error"]
 published: true
 ---
 
-## エラーの概要
+# エラーの概要
 
-Vercelの504エラーは、デプロイされたサーバーレス関数の実行がタイムアウトに達したことを示します。Hobbyプランでは10秒、Proプラン以上では300秒が実行時間の上限となり、この制限を超えると504 Gateway Timeoutレスポンスが返されます。一般的に、API呼び出しやデータベースクエリの応答待ちが長引く場合に発生しやすいエラーです。
+Vercel の 504 エラーは、デプロイされたサーバーレス関数の実行がタイムアウトに達したことを示します。実行時間の上限はプランと設定によって異なります。Hobby プランではデフォルト 60 秒で、Fluid Compute を有効にすることで最大 300 秒まで延長可能です。Pro プラン以上ではデフォルト 300 秒で、Fluid Compute を有効にすると最大 800 秒（約 13 分）まで延長可能です。制限を超えると 504 Gateway Timeout レスポンスが返されます。一般的に、API 呼び出しやデータベースクエリの応答待ちが長引く場合に発生しやすいエラーです。
 
 ## 実際のエラーメッセージ例
 
-**Vercelのブラウザ表示：**
+**Vercel のブラウザー表示：**
 
 ```
 504
@@ -31,7 +31,7 @@ Gateway Timeout
 }
 ```
 
-**cURLレスポンス：**
+**curl レスポンス：**
 
 ```
 HTTP/1.1 504 Gateway Timeout
@@ -44,16 +44,16 @@ Connection: close
 
 ## よくある原因と解決手順
 
-### 原因1：Hobbyプランのタイムアウト制限（10秒）に引っかかっている
+### 原因1：関数の実行時間が制限値に達している
 
-Vercelの無料Hobbyプランでは、サーバーレス関数の最大実行時間が10秒に制限されています。この時間内に処理が完了しないと自動的に504エラーが返されます。特に外部APIの呼び出しやデータベースアクセスが複数含まれる関数では、容易にこの上限に達する可能性があります。
+Vercel のサーバーレス関数には、プランごとの実行時間制限があります。Hobby プランではデフォルト 60 秒、Pro プラン以上ではデフォルト 300 秒です。`maxDuration` を設定することで制限内での調整が可能です。特に外部 API の呼び出しやデータベースアクセスが複数含まれる関数では、容易にこの上限に達する可能性があります。
 
 **修正前（エラーが起きるコード）：**
 
 ```javascript
 // api/getUserData.js
 export default async function handler(req, res) {
-  // 外部APIを3つ順次実行（各3秒）→ 合計9秒
+  // 外部 API を 3 つ順次実行（各 3 秒）→ 合計 9 秒
   const user = await fetch('https://api.example.com/user/123').then(r => r.json());
   const posts = await fetch('https://api.example.com/posts/123').then(r => r.json());
   const comments = await fetch('https://api.example.com/comments/123').then(r => r.json());
@@ -62,12 +62,12 @@ export default async function handler(req, res) {
 }
 ```
 
-**修正後：**
+**修正後（API 呼び出しの並列実行）：**
 
 ```javascript
 // api/getUserData.js
 export default async function handler(req, res) {
-  // 複数APIを並列実行（合計3秒に短縮）
+  // 複数 API を並列実行（合計 3 秒に短縮）
   const [user, posts, comments] = await Promise.all([
     fetch('https://api.example.com/user/123').then(r => r.json()),
     fetch('https://api.example.com/posts/123').then(r => r.json()),
@@ -78,11 +78,43 @@ export default async function handler(req, res) {
 }
 ```
 
-または、Proプラン（300秒上限）へのアップグレードも検討してください。Vercel Dashboardの「Settings」→「Plan」から変更可能です。
+**修正後（maxDuration の設定）：**
 
-### 原因2：外部API・データベース接続にタイムアウトが設定されていない
+実行時間を延長する場合、`maxDuration` を明示的に設定できます：
 
-外部サービスへのリクエストがハング状態に陥ると、関数全体が待機し続けて504に陥ります。特にネットワークが不安定な環境では、接続先が応答しなくなるケースが頻繁に発生します。
+```javascript
+// vercel.json
+{
+  "functions": {
+    "api/getUserData.js": {
+      "maxDuration": 300
+    }
+  }
+}
+```
+
+Hobby プランの場合はデフォルト 60 秒ですが、Fluid Compute を有効にすることで最大 300 秒まで設定可能です。
+
+### 原因2：Vercel Fluid Compute を有効にしていない
+
+Pro プラン以上を使用している場合、Vercel Fluid Compute を有効にすることで、関数の実行時間上限を 300 秒から 800 秒（約 13 分）に延長できます。Hobby プランでも Fluid Compute を有効にすることで、60 秒から 300 秒まで延長可能です。Vercel Dashboard の「Settings」→「Functions」から有効化してください。
+
+また、`maxDuration` を設定してさらに細かく制御することもできます：
+
+```javascript
+// vercel.json
+{
+  "functions": {
+    "api/heavyProcessing.js": {
+      "maxDuration": 800
+    }
+  }
+}
+```
+
+### 原因3：外部 API・データベース接続にタイムアウトが設定されていない
+
+外部サービスへのリクエストがハング状態に陥ると、関数全体が待機し続けて 504 に陥ります。特にネットワークが不安定な環境では、接続先が応答しなくなるケースが頻繁に発生します。
 
 **修正前（エラーが起きるコード）：**
 
@@ -106,7 +138,7 @@ export default async function handler(req, res) {
 import fetch from 'node-fetch';
 
 export default async function handler(req, res) {
-  // 5秒のタイムアウトを設定
+  // 5 秒のタイムアウトを設定
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 5000);
   
@@ -127,9 +159,9 @@ export default async function handler(req, res) {
 }
 ```
 
-### 原因3：重い同期的なデータ処理を関数内で実行している
+### 原因4：重い同期的なデータ処理を関数内で実行している
 
-画像リサイズ、CSV解析、機械学習推論など、CPU集約的な処理を直接関数内で行うと、瞬く間にタイムアウトに達します。これらの処理は関数の責務外に切り出し、キューイングシステムで非同期実行するべきです。
+画像リサイズ、CSV 解析、機械学習推論など、CPU 集約的な処理を直接関数内で行うと、瞬く間にタイムアウトに達します。これらの処理は関数の責務外に切り出し、キューイングシステムで非同期実行するべきです。
 
 **修正前（エラーが起きるコード）：**
 
@@ -139,7 +171,7 @@ import sharp from 'sharp';
 import fs from 'fs';
 
 export default async function handler(req, res) {
-  // 10MBの画像を複数フォーマットで変換（5秒以上かかる）
+  // 10MB の画像を複数フォーマットで変換（5 秒以上かかる）
   const imageBuffer = fs.readFileSync('/tmp/large-image.jpg');
   
   const webp = await sharp(imageBuffer).webp().toBuffer();
@@ -150,7 +182,32 @@ export default async function handler(req, res) {
 }
 ```
 
-**修正後：**
+**修正後（バックグラウンド処理の利用）：**
+
+```javascript
+// api/processImage.js
+export default async function handler(req, res) {
+  // バックグラウンド処理を開始し、即座に返す
+  event.waitUntil(processImageInBackground(req.body.imageId));
+  
+  res.status(202).json({ 
+    message: 'Image processing started',
+    jobId: req.body.imageId
+  });
+}
+
+async function processImageInBackground(imageId) {
+  // 重い処理はバックグラウンドで実行
+  const imageBuffer = await fetchImage(imageId);
+  await Promise.all([
+    convertToWebP(imageBuffer),
+    convertToAVIF(imageBuffer),
+    createThumbnail(imageBuffer)
+  ]);
+}
+```
+
+キューイングシステム（Redis、Bull など）を使用する方法もあります：
 
 ```javascript
 // api/processImage.js
@@ -178,35 +235,35 @@ export default async function handler(req, res) {
 }
 ```
 
-別途ワーカープロセスで非同期に処理を実行し、Redisなどで進捗を管理します。
+別途ワーカープロセスで非同期に処理を実行し、Redis などで進捗を管理します。
 
-## Vercel固有の注意点
+## Vercel 固有の注意点
 
-Vercelのサーバーレス関数にはプランごとの実行時間制限のほか、メモリー上限やコールドスタート時間も性能に影響します。Hobbyプラン利用時は以下の点に留意してください：
+Vercel のサーバーレス関数にはプランごとの実行時間制限のほか、メモリー上限やコールドスタート時間も性能に影響します。以下の点に留意してください：
 
-- **実行時間上限：10秒**（Proは300秒、Enterpriseは3600秒）
-- **メモリー上限：3008MB**（共有リソース）
-- **同時実行数制限：1000**（Hobbyは低い優先度）
+- **Hobby プラン：実行時間デフォルト 60 秒（Fluid Compute で最大 300 秒）、メモリー上限 3008MB**
+- **Pro プラン以上：実行時間デフォルト 300 秒、Fluid Compute で最大 800 秒、メモリー上限 3008MB**
+- **同時実行数制限：1000（Hobby プランは優先度が低い）**
 
-また、Vercelの`vercel logs`コマンドでリアルタイムログを確認できます：
+Vercel の `vercel logs` コマンドでリアルタイムログを確認できます：
 
 ```bash
 vercel logs <your-project-name> --follow
 ```
 
-このログで関数の実際の実行時間を確認し、10秒に近づいていないか監視するとよいでしょう。
+このログで関数の実際の実行時間を確認し、制限値に近づいていないか監視するとよいでしょう。
 
-## それでも解決しない場合
+## トラブルシューティング手順
 
-Vercel Dashboardの「Deployments」タブで該当デプロイメントのログを確認してください。「Functions」セクションで実行時間の詳細が表示されます。以下のコマンドでローカルテストも有効です：
+Vercel Dashboard の「Deployments」タブで該当デプロイメントのログを確認してください。「Functions」セクションで実行時間の詳細が表示されます。以下のコマンドでローカルテストも有効です：
 
 ```bash
 vercel dev
 ```
 
-この環境ではタイムアウト上限なく関数を実行でき、実際の処理時間を計測できます。関数内に`console.log()`を仕込んで各処理の経過時間を記録し、ボトルネックを特定してください。
+この環境ではタイムアウト上限なく関数を実行でき、実際の処理時間を計測できます。関数内に `console.log()` を仕込んで各処理の経過時間を記録し、ボトルネックを特定してください。
 
-原因不明の場合は、Vercelの公式ドキュメント（https://vercel.com/docs/functions/serverless-functions/limitations）を参照するか、Vercelサポートに問い合わせてください。エンタープライズ契約がある場合は、優先サポートが利用可能です。
+原因不明の場合は、Vercel の公式ドキュメント（https://vercel.com/docs/functions/serverless-functions/limitations）を参照するか、Vercel サポートに問い合わせてください。エンタープライズ契約がある場合は、優先サポートが利用可能です。
 
 ---
 
