@@ -6,6 +6,11 @@ topics: ["terraform", "error"]
 published: true
 ---
 
+:::message
+本記事は技術エラー解説サイト [errorlog.jp](https://errorlog.jp/) からの転載です。最新の内容と関連エラーの一覧は元記事を参照してください。
+元記事: https://errorlog.jp/posts/terraform_500/
+:::
+
 # Terraform で 500 エラーが発生した場合の対処方法
 
 ## エラーの概要
