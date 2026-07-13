@@ -3,7 +3,7 @@ title: "OpenAI API の 503 エラー：原因と解決策"
 emoji: "🚫"
 type: "tech"
 topics: ["openai-api", "error"]
-published: true
+published: false
 ---
 
 ## エラーの概要

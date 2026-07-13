@@ -3,7 +3,7 @@ title: "Vercel の 504 エラー：原因と解決策"
 emoji: "▲"
 type: "tech"
 topics: ["vercel", "error"]
-published: true
+published: false
 ---
 
 ## エラーの概要

@@ -6,6 +6,11 @@ topics: ["azure", "error"]
 published: true
 ---
 
+:::message
+本記事は技術エラー解説サイト [errorlog.jp](https://errorlog.jp/) からの転載です。最新の内容と関連エラーの一覧は元記事を参照してください。
+元記事: https://errorlog.jp/posts/azure_401/
+:::
+
 ## エラーの概要
 
 Azure への API リクエストやコマンド実行時に 401 Unauthorized エラーが返される場合、認証情報が無効であるか期限切れになっていることを示しています。このエラーが発生すると、Azure リソースへのアクセスが完全にブロックされ、デプロイやリソース管理の操作が実行できなくなります。Azure CLI、SDK、マネージド ID など複数の認証方式で発生する可能性があります。
@@ -68,7 +73,7 @@ $ az vm list --resource-group myResourceGroup
 
 ### 原因2：サービスプリンシパルのシークレットが期限切れになっている
 
-CI/CD パイプラインやスクリプト自動化でサービスプリンシパル認証を使用している場合、設定したシークレット（またはクライアントシークレット）の有効期限が切れると 401 エラーが発生します。Azure では セキュリティ上の理由から、デフォルトでシークレットに 1 ～ 2 年の有効期限が設定されます。
+CI/CD パイプラインやスクリプト自動化でサービスプリンシパル認証を使用している場合、設定したシークレット（またはクライアントシークレット）の有効期限が切れると 401 エラーが発生します。Azure ではセキュリティ上の理由から、デフォルトでシークレットに 1 ～ 2 年の有効期限が設定されます。
 
 **Before（エラーが起きるコード）：**
 
@@ -108,7 +113,7 @@ $ az login --service-principal \
 
 ### 原因3：マネージド ID が有効になっていないリソースで使用しようとしている
 
-Azure Virtual Machine、Azure Functions、App Service などのリソースでマネージド ID認証を使用する場合、対象のリソースでマネージド ID 機能が有効化されていないと 401 エラーが発生します。マネージド ID は Azure が自動的に管理する認証方式で、シークレット管理の手間を削減します。
+Azure Virtual Machine、Azure Functions、App Service などのリソースでマネージド ID 認証を使用する場合、対象のリソースでマネージド ID 機能が有効化されていないと 401 エラーが発生します。マネージド ID は Azure が自動的に管理する認証方式で、シークレット管理の手間を削減します。
 
 **Before（エラーが起きるコード）：**
 
@@ -172,7 +177,7 @@ from azure.identity import DefaultAzureCredential
 credential = DefaultAzureCredential()
 ```
 
-このコマンドで、どの認証方式が試行され、どこで失敗しているかを特定できます。
+このコードで、どの認証方式が試行され、どこで失敗しているかを特定できます。
 
 **公式ドキュメント参照：** Azure 認証について詳しくは、[Microsoft Learn の Azure 認証ガイド](https://learn.microsoft.com/ja-jp/azure/developer/python/sdk/authentication-overview) および [Azure CLI ドキュメント](https://learn.microsoft.com/ja-jp/cli/azure/) を参照してください。
 

@@ -6,6 +6,11 @@ topics: ["docker-compose", "docker", "error"]
 published: true
 ---
 
+:::message
+本記事は技術エラー解説サイト [errorlog.jp](https://errorlog.jp/) からの転載です。最新の内容と関連エラーの一覧は元記事を参照してください。
+元記事: https://errorlog.jp/posts/docker_compose_env_utf16_bom_windows/
+:::
+
 Windows環境でDocker Composeを使う際、PowerShellで作成した`.env`ファイルが原因でコンテナが起動できないケースがあります。エラーメッセージに`\xff\xfe`や`unexpected character`が含まれている場合、ファイルのエンコードが原因です。
 
 ## エラーの全文

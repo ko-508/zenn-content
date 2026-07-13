@@ -6,6 +6,11 @@ topics: ["aws", "error"]
 published: true
 ---
 
+:::message
+本記事は技術エラー解説サイト [errorlog.jp](https://errorlog.jp/) からの転載です。最新の内容と関連エラーの一覧は元記事を参照してください。
+元記事: https://errorlog.jp/posts/aws_502/
+:::
+
 ## エラーの概要
 
 502 Bad Gateway は、API Gateway や Application Load Balancer（ALB）がバックエンド（EC2、Lambda、ECS など）から不正な応答を受け取った、あるいは応答を得られなかったことを示すエラーです。AWS 環境では、バックエンドサービスの一時的な障害やタイムアウト、リソース不足など複数の原因で発生しやすいステータスコードです。

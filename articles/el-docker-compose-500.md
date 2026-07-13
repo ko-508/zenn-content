@@ -6,6 +6,11 @@ topics: ["docker-compose", "error"]
 published: true
 ---
 
+:::message
+本記事は技術エラー解説サイト [errorlog.jp](https://errorlog.jp/) からの転載です。最新の内容と関連エラーの一覧は元記事を参照してください。
+元記事: https://errorlog.jp/posts/docker_compose_500/
+:::
+
 ## エラーの概要
 
 Docker Compose の 500 エラーは、Docker Compose 自体またはそれが管理するコンテナー内で内部エラーが発生したことを示します。このエラーは通常、コンテナー起動時のアプリケーションクラッシュ、エントリポイント実行の失敗、またはヘルスチェック機構の不具合によって引き起こされます。対象のサービスが正常に起動・稼働できない状態を意味しており、迅速な原因特定と対応が必要です。

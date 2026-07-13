@@ -6,102 +6,334 @@ topics: ["gcp", "error"]
 published: true
 ---
 
-GCP（Google Cloud Platform）で503エラーが発生した場合、Google Cloudサービス側が一時的に利用できない状態です。このエラーは、サービスのメンテナンスや過負荷、またはサーバーレスサービスの起動遅延が主な原因です。
+:::message
+本記事は技術エラー解説サイト [errorlog.jp](https://errorlog.jp/) からの転載です。最新の内容と関連エラーの一覧は元記事を参照してください。
+元記事: https://errorlog.jp/posts/gcp_503/
+:::
 
-## よくある原因
+## エラーの概要
 
-**GCPサービスのメンテナンスまたは過負荷状態**
+GCPの503エラーは「Service Unavailable（サービス利用不可）」を意味し、リクエストを処理するサーバーが一時的に応答できない状態です。Google Cloud RunやCloud Functions、Cloud Load Balancerなどのサービスで発生します。原因はGCP側のメンテナンス・過負荷、またはアプリケーション側のリソース枯渇やタイムアウトまで多岐にわたります。
 
-Google Cloud全体またはあなたが利用しているサービス（Cloud Run、Cloud Functions、Cloud SQL等）がメンテナンス中または過負荷状態に陥っている場合に503エラーが発生します。これはGCP側の問題であり、ユーザーのアプリケーションコードには原因がありません。
+## 実際のエラーメッセージ例
 
-**Cloud Runのコールドスタート時のタイムアウト**
-
-Cloud Runでは、デプロイ直後またはしばらくリクエストがない状態から新しいリクエストが来た場合、インスタンスの起動に時間がかかります。この起動中（コールドスタート）にリクエストがタイムアウトすると、503エラーが返されます。デフォルト設定では最小インスタンス数が0に設定されているため、起動待ちの間にリクエストが失敗しやすくなります。
-
-**リージョンの容量不足**
-
-特定のGCPリージョンで一時的に容量が足りなくなり、新しいインスタンスやリソースを作成できない状態に陥ることがあります。この場合も503エラーが返されます。
-
-## 解決手順
-
-**ステップ1：GCPサービスの状態を確認する**
-
-まず、GCP側で障害が発生していないか確認します。status.cloud.google.comにアクセスしてください。
-
-```bash
-# または curl コマンドでサービス状態ページを確認
-curl https://status.cloud.google.com
+**Cloud Run / Cloud Functions の場合：**
+```json
+{
+  "code": 503,
+  "message": "Service Unavailable",
+  "details": "The service is temporarily unavailable. Please try again later.",
+  "status": "UNAVAILABLE"
+}
 ```
 
-ページ上で「Service Status」から各サービスの状態を確認します。赤色やオレンジ色の警告が表示されている場合は、GCP側の問題です。この場合は復旧を待つしかありません。
+**ブラウザやcURLアクセス時：**
+```
+HTTP/1.1 503 Service Unavailable
+Content-Type: text/html; charset=utf-8
 
-**ステップ2：Cloud Runの場合は min-instances を設定する**
-
-Cloud Runを使用している場合、最小インスタンス数をを1以上に設定してコールドスタートを根絶します。
-
-```bash
-gcloud run deploy <your-service-name> \
-  --min-instances=1 \
-  --region=<your-region> \
-  --project=<your-project-id>
+<html>
+<head><title>503 Service Unavailable</title></head>
+<body>
+<center><h1>503 Service Unavailable</h1></center>
+</body>
+</html>
 ```
 
-既存サービスの設定を変更する場合は以下を実行します。
 
-```bash
-gcloud run services update <your-service-name> \
-  --min-instances=1 \
-  --region=<your-region> \
-  --project=<your-project-id>
-```
+## よくある原因と解決手順
 
-Cloud Consoleから設定する場合は、Cloud Run → サービス一覧 → 対象サービスをクリック → 「編集して新しいリビジョンをデプロイ」 → 「詳細設定」→「最小インスタンス数」を1に変更します。
+### 原因1：Cloud Runのリソース不足（メモリ・CPU枯渇）
 
-**ステップ3：数分待機してから再試行する**
+デプロイされたコンテナが割り当てられたメモリ・CPUを超過して利用しようとすると、GCPが503エラーで新しいリクエストを拒否します。特に計算量が多い処理や大量のデータ処理を行う場合に顕著です。
 
-GCP側の過負荷状態である場合、通常は数分～数十分で復旧します。指数バックオフ（最初は短い待機時間、失敗するたびに待機時間を増やす）を実装して自動再試行します。
-
+**Before（エラーが起きるコード）：**
 ```python
-import requests
-import time
+from flask import Flask, request
+import json
 
-def fetch_with_retry(url, max_retries=5):
-    for attempt in range(max_retries):
-        try:
-            response = requests.get(url, timeout=10)
-            response.raise_for_status()
-            return response
-        except requests.exceptions.HTTPError as e:
-            if e.response.status_code == 503:
-                wait_time = 2 ** attempt  # 1秒、2秒、4秒、8秒、16秒...
-                print(f"503エラー発生。{wait_time}秒後に再試行します...")
-                time.sleep(wait_time)
-            else:
-                raise
-    raise Exception("最大リトライ回数に達しました")
+app = Flask(__name__)
+
+@app.route('/process', methods=['POST'])
+def process_data():
+    # メモリ不足を起こしやすい大規模リストの生成
+    large_list = [i * 100 for i in range(10**7)]  # 1000万要素
+    
+    data = request.json
+    result = sum(large_list)  # 重い処理
+    return {'result': result}, 200
+
+if __name__ == '__main__':
+    app.run(port=8080)
 ```
 
-**ステップ4：ログを確認してアプリケーションの問題がないか確認する**
+**After（修正後）：**
+```python
+from flask import Flask, request
+import json
+import gc
 
-Cloud Logging（旧 Stackdriver Logging）でアプリケーションログを確認します。
+app = Flask(__name__)
+
+@app.route('/process', methods=['POST'])
+def process_data():
+    # ジェネレータを使用してメモリ効率を改善
+    def data_generator():
+        for i in range(10**7):
+            yield i * 100
+    
+    data = request.json
+    result = sum(data_generator())  # メモリ使用量を最小化
+    gc.collect()  # 明示的にガベージコレクション実行
+    return {'result': result}, 200
+
+if __name__ == '__main__':
+    app.run(port=8080)
+```
+
+Cloud Runのメモリ割り当てを増加させる場合、gcloud CLIで以下を実行します：
+```bash
+gcloud run deploy <service-name> \
+  --memory 2Gi \
+  --region <region> \
+  --project <project-id>
+```
+
+### 原因2：Cloud Runのコールドスタート時の初期化タイムアウト
+
+新しいコンテナが起動する際に初期化処理（データベース接続、外部APIの呼び出し、ファイルの読み込みなど）に時間がかかると、リクエストがタイムアウトして503エラーが返されます。デフォルトのタイムアウト制限は15分ですが、実質的には短い場合があります。
+
+**Before（エラーが起きるコード）：**
+```python
+from flask import Flask
+import requests
+
+app = Flask(__name__)
+
+# グローバルスコープで重い初期化を実施
+print("初期化開始...")
+external_data = requests.get('https://slow-api.example.com/data', timeout=10).json()
+print(f"外部データ取得完了: {len(external_data)} 件")
+
+@app.route('/hello', methods=['GET'])
+def hello():
+    return {'data': external_data[:10]}, 200
+
+if __name__ == '__main__':
+    app.run(port=8080)
+```
+
+**After（修正後）：**
+```python
+from flask import Flask
+import requests
+
+app = Flask(__name__)
+
+external_data = None
+
+def initialize_data():
+    global external_data
+    try:
+        print("初期化開始...")
+        external_data = requests.get(
+            'https://slow-api.example.com/data',
+            timeout=5
+        ).json()
+        print(f"外部データ取得完了: {len(external_data)} 件")
+    except requests.Timeout:
+        print("初期化タイムアウト。フォールバック処理を実行")
+        external_data = []
+
+@app.route('/hello', methods=['GET'])
+def hello():
+    global external_data
+    if external_data is None:
+        initialize_data()  # 遅延初期化：リクエスト時に実行
+    return {'data': external_data[:10]}, 200
+
+@app.route('/health', methods=['GET'])
+def health():
+    return {'status': 'ok'}, 200
+
+if __name__ == '__main__':
+    app.run(port=8080)
+```
+
+同時に、Cloud Runのヘルスチェック設定でリクエストがタイムアウトしないよう調整します：
+```bash
+gcloud run deploy <service-name> \
+  --timeout 3600 \
+  --region <region> \
+  --project <project-id>
+```
+
+### 原因3：バックエンドサービス（Cloud SQL、外部API）への接続失敗
+
+Cloud FunctionsやCloud Runから、Cloud SQLやVPC内のリソース、または外部APIへのアクセスが遮断・タイムアウトしている場合、連鎖的に503エラーが発生します。接続プーム枯渇やネットワーク設定の誤りが主な原因です。
+
+**Before（エラーが起きるコード）：**
+```python
+import sqlalchemy
+from flask import Flask
+from google.cloud.sql.connector import Connector
+
+app = Flask(__name__)
+
+# 接続ごとに新しいConnectorを作成（非効率）
+@app.route('/query', methods=['GET'])
+def query_database():
+    connector = Connector()  # メモリリーク・リソース枯渇の原因
+    conn = connector.connect(
+        "<project>:<region>:<instance>",
+        "pymysql",
+        user="<db-user>",
+        password="<db-password>",
+        db="<database>"
+    )
+    result = conn.execute("SELECT COUNT(*) FROM users").fetchone()
+    conn.close()
+    return {'count': result[0]}, 200
+```
+
+**After（修正後）：**
+```python
+import sqlalchemy
+from flask import Flask
+from google.cloud.sql.connector import Connector
+
+app = Flask(__name__)
+
+# グローバルスコープでConnectorを初期化（接続プールを再利用）
+connector = Connector()
+
+def get_connection():
+    return connector.connect(
+        "<project>:<region>:<instance>",
+        "pymysql",
+        user="<db-user>",
+        password="<db-password>",
+        db="<database>",
+        pool_size=5,
+        max_overflow=10
+    )
+
+@app.route('/query', methods=['GET'])
+def query_database():
+    try:
+        conn = get_connection()
+        result = conn.execute(
+            sqlalchemy.text("SELECT COUNT(*) FROM users")
+        ).fetchone()
+        conn.close()
+        return {'count': result[0]}, 200
+    except Exception as e:
+        return {'error': str(e)}, 503
+
+if __name__ == '__main__':
+    app.run(port=8080)
+```
+
+VPC接続の設定確認：
+```bash
+gcloud run services describe <service-name> \
+  --region <region> \
+  --project <project-id> \
+  --format="value(status.traffic[0].revisions)"
+```
+
+### 原因4：Load Balancerのバックエンドヘルスチェック失敗
+
+Cloud Load Balancerでバックエンドサービスのヘルスチェックが失敗している場合、全リクエストが503エラーで返されます。ヘルスチェックエンドポイントの実装ミスやタイムアウト値の設定不足が主原因です。
+
+**Before（エラーが起きるコード）：**
+```python
+from flask import Flask
+
+app = Flask(__name__)
+
+@app.route('/api/data', methods=['GET'])
+def get_data():
+    # ヘルスチェックエンドポイントが実装されていない
+    return {'data': 'example'}, 200
+
+if __name__ == '__main__':
+    app.run(port=8080)
+```
+
+**After（修正後）：**
+```python
+from flask import Flask
+
+app = Flask(__name__)
+
+@app.route('/healthz', methods=['GET'])
+def health_check():
+    # Load Balancerのヘルスチェック用エンドポイント
+    # 外部依存なしで高速に応答
+    return '', 200
+
+@app.route('/api/data', methods=['GET'])
+def get_data():
+    return {'data': 'example'}, 200
+
+if __name__ == '__main__':
+    app.run(port=8080)
+```
+
+Load Balancerのヘルスチェック設定確認：
+```bash
+gcloud compute backend-services describe <backend-service-name> \
+  --global \
+  --project <project-id> \
+  --format="value(healthChecks[0])"
+```
+
+## ツール固有の注意点
+
+**Cloud Run の場合**
+- コンテナイメージサイズが500MBを超える場合、デプロイ・起動に時間がかかり503の原因となります。マルチステージビルドでイメージサイズを削減してください。
+- Cloud Runは自動的にスケーリングされますが、同時リクエスト数が上限（デフォルト1000）に達すると新規リクエストが503で返されます。`--concurrency` フラグで調整可能です。
 
 ```bash
-gcloud logging read "resource.type=cloud_run_revision AND resource.labels.service_name=<your-service-name>" \
-  --limit=50 \
-  --format=json \
-  --project=<your-project-id>
+gcloud run deploy <service-name> \
+  --concurrency 2000 \
+  --region <region> \
+  --project <project-id>
 ```
 
-Cloud Consoleから確認する場合は、Cloud Logging → ログエクスプローラ → リソースフィルタで「Cloud Run」を選択し、サービス名で絞り込みます。
+**Cloud Functions の場合**
+- Cloud Functions は、第1世代(1st gen)では最大540秒、第2世代(2nd gen)ではデフォルト60秒・最大3600秒(60分)です。この実行時間制限内に処理が完了しないと503エラーになることがあります。long-running タスクはCloud Tasksキューを経由して処理してください。
+
+**Compute Engine / GKE の場合**
+- インスタンスに接続できない場合も503が返されます。ファイアウォールルール・SSHキー設定を確認してください。
+```bash
+gcloud compute firewall-rules list --filter="network:default" --project <project-id>
+```
 
 ## それでも解決しない場合
 
-503エラーが頻繁に発生し続ける場合は、以下を確認してください。
+**GCP Cloud Status Dashboard を確認**
+https://status.cloud.google.com にアクセスして、該当サービス（Cloud Run、Cloud Functions、Cloud Load Balancer等）に障害が報告されていないか確認してください。
 
-- **Cloud Runのメモリ設定**：メモリが不足していないか確認します。通常は256MB以上を推奨します。
-- **リージョンの変更**：特定リージョンで容量不足が続く場合は、別のリージョンへのデプロイを検討します。
-- **Cloud Runの同時実行数制限**：「最大同時実行数」が低く設定されていないか確認し、必要に応じて引き上げます。
-- **GCP公式サポートへの連絡**：持続的な問題の場合はGoogle Cloudサポートに問い合わせます。Cloud Consoleのサポート → 「新しいケースを作成」から報告できます。
+**ログを詳細に調査**
+Cloud Logging で詳細ログを確認します：
+```bash
+gcloud logging read "resource.type=cloud_run_revision AND httpRequest.status=503" \
+  --limit 50 \
+  --format json \
+  --project <project-id>
+```
+
+**Cloud Trace で遅延を分析**
+https://console.cloud.google.com/traces にアクセスしてリクエストの処理フロー全体を可視化し、どのステップで遅延しているかを特定します。
+
+**GCP サポートへの問い合わせ**
+GCP有償サポートを契約している場合、以下情報とともに問い合わせてください：
+- エラーが発生した時刻（UTC）
+- Cloud Logging のトレースID
+- リクエストのX-Cloud-Trace-Contextヘッダー値
+- デプロイされたコンテナイメージのURL
 
 ---
 

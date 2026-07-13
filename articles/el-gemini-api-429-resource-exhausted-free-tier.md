@@ -3,7 +3,7 @@ title: "Gemini API の 429 エラー：無料枠クォータ枯渇と解決策"
 emoji: "🚫"
 type: "tech"
 topics: ["gcp", "error"]
-published: true
+published: false
 ---
 
 Gemini API を自動化スクリプトやバックグラウンドジョブに組み込んだ際、無料枠のクォータを短時間で使い切り `429 RESOURCE_EXHAUSTED` が連続発生するケースがあります。特に複数リクエストを並列・連続で投げる処理では、1回のバッチ実行で当日分のクォータが尽きることがあります。

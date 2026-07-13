@@ -3,7 +3,7 @@ title: "Stripe の 429 エラー：原因と解決策"
 emoji: "💳"
 type: "tech"
 topics: ["stripe", "error"]
-published: true
+published: false
 ---
 
 ## エラーの概要

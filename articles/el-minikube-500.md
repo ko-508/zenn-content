@@ -3,7 +3,7 @@ title: "Minikube の 500 エラー：原因と解決策"
 emoji: "🚫"
 type: "tech"
 topics: ["minikube", "error"]
-published: true
+published: false
 ---
 
 Minikubeでクラスター内部の予期しないエラーが発生し、HTTP ステータス 500 が返されている状況です。API サーバーの不安定性やリソース枯渇が主な原因となります。

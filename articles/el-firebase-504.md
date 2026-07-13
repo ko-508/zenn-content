@@ -3,7 +3,7 @@ title: "Firebase の 504 エラー：原因と解決策"
 emoji: "🔥"
 type: "tech"
 topics: ["firebase", "error"]
-published: true
+published: false
 ---
 
 Firebase HostingまたはCloud Functionsのバックエンド処理がタイムアウトし、クライアントに504エラーが返される状況です。この記事では原因の特定と具体的な解決方法を解説します。

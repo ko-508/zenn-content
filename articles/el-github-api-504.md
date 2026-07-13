@@ -6,6 +6,11 @@ topics: ["github-api", "error"]
 published: true
 ---
 
+:::message
+本記事は技術エラー解説サイト [errorlog.jp](https://errorlog.jp/) からの転載です。最新の内容と関連エラーの一覧は元記事を参照してください。
+元記事: https://errorlog.jp/posts/github_api_504/
+:::
+
 ## エラーの概要
 
 GitHub APIの504 Gateway Timeoutエラーは、GitHubのサーバーがあなたのリクエストを指定時間内に処理できなかったことを示します。このエラーはGitHub側のサーバー遅延、ネットワーク遅延、または処理が重い操作が原因で発生することが多いです。REST APIを呼び出した際に504が返されると、リクエストが完全に失敗するため、API統合機能が一時的に停止する状況につながります。

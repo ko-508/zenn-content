@@ -3,7 +3,7 @@ title: "Minikube の 404 エラー：原因と解決策"
 emoji: "🚫"
 type: "tech"
 topics: ["minikube", "error"]
-published: true
+published: false
 ---
 
 Minikube で 404 エラーが出た場合、指定した Kubernetes リソースが見つからないことを示しています。このエラーは開発環境でよく発生し、適切な確認手順で迅速に解決できます。

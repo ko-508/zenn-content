@@ -6,6 +6,11 @@ topics: ["docker-compose", "error"]
 published: true
 ---
 
+:::message
+本記事は技術エラー解説サイト [errorlog.jp](https://errorlog.jp/) からの転載です。最新の内容と関連エラーの一覧は元記事を参照してください。
+元記事: https://errorlog.jp/posts/docker_compose_404/
+:::
+
 ## エラーの概要
 
 Docker Compose の 404 エラーは、`docker-compose.yml`（または `compose.yml`）で指定されたイメージ、サービス、ボリューム、またはネットワークがシステムに見つからないときに発生します。このエラーは、イメージのプル失敗、ビルドコンテキストの誤設定、または依存リソースの不足が原因となることがほとんどです。Docker Compose がコンテナーの起動や構築を試みた際に、参照先が存在しないことを検出すると、このエラーを出力して処理を中断します。

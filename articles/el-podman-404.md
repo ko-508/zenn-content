@@ -3,7 +3,7 @@ title: "Podman の 404 エラー：原因と解決策"
 emoji: "🚫"
 type: "tech"
 topics: ["podman", "error"]
-published: true
+published: false
 ---
 
 Podman で 404 エラーが発生した場合、指定したイメージまたはコンテナーがシステム上に見つからないことを意味します。コマンド実行時にイメージ名やコンテナー名の指定に問題があるケースがほとんどです。

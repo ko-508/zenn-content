@@ -6,6 +6,11 @@ topics: ["github-api", "error"]
 published: true
 ---
 
+:::message
+本記事は技術エラー解説サイト [errorlog.jp](https://errorlog.jp/) からの転載です。最新の内容と関連エラーの一覧は元記事を参照してください。
+元記事: https://errorlog.jp/posts/github_api_429/
+:::
+
 ## エラーの概要
 
 GitHub APIの429エラーは「Too Many Requests」を意味し、レート制限に達したことを示します。GitHubは不正アクセスやDDoS攻撃から保護するため、APIリクエスト数に制限を設けており、この上限を超えると429が返されます。認証の有無やエンドポイント、時間窓によって制限値が異なるため、適切な対策が必須です。

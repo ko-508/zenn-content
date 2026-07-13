@@ -6,6 +6,11 @@ topics: ["aws", "error"]
 published: true
 ---
 
+:::message
+本記事は技術エラー解説サイト [errorlog.jp](https://errorlog.jp/) からの転載です。最新の内容と関連エラーの一覧は元記事を参照してください。
+元記事: https://errorlog.jp/posts/aws_403/
+:::
+
 ## エラーの概要
 
 AWS の 403 エラーは、HTTP ステータスコード 403 Forbidden として返されます。これは認証には成功したものの、実行しようとしている操作に対する IAM (Identity and Access Management) 権限が不足していることを意味します。AWS リソースへのアクセス、API 呼び出し、AWS マネジメントコンソール上での操作など、様々な場面で発生する一般的なエラーです。

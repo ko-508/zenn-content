@@ -3,7 +3,7 @@ title: "OpenAI API の 422 エラー：原因と解決策"
 emoji: "🚫"
 type: "tech"
 topics: ["openai-api", "error"]
-published: true
+published: false
 ---
 
 OpenAI APIで422エラーが発生するのは、リクエストの構文は正しいものの、含まれるデータが処理要件を満たしていないときです。特にFine-tuningでよく出現するエラーです。

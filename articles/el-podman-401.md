@@ -3,7 +3,7 @@ title: "Podman の 401 エラー：原因と解決策"
 emoji: "🚫"
 type: "tech"
 topics: ["podman", "error"]
-published: true
+published: false
 ---
 
 Podmanでコンテナイメージをpullやpushしようとすると、401認証エラーが発生することがあります。このエラーはレジストリへの認証に失敗したときに出現し、適切な認証情報がないか有効期限切れの状態を示しています。

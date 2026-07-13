@@ -3,7 +3,7 @@ title: "Stripe の 402 エラー：原因と解決策"
 emoji: "💳"
 type: "tech"
 topics: ["stripe", "error"]
-published: true
+published: false
 ---
 
 # Stripeの402エラーは「Payment Required」を意味し、決済処理が失敗したときに返されるHTTPステータスコードです。カード拒否、残高不足、不正利用の疑い、または3Dセキュア認証の失敗など、支払い側の問題で決済が完了できない状態を示しています。このエラーが発生した場合、決済データ自体は失われていませんが、トランザクション（取引）は成功していません。

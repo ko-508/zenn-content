@@ -6,6 +6,11 @@ topics: ["github-api", "error"]
 published: true
 ---
 
+:::message
+本記事は技術エラー解説サイト [errorlog.jp](https://errorlog.jp/) からの転載です。最新の内容と関連エラーの一覧は元記事を参照してください。
+元記事: https://errorlog.jp/posts/github_api_422/
+:::
+
 ## エラーの概要
 
 422 Unprocessable Entity は、HTTPリクエストの形式は正しいものの、送信されたデータが GitHub API の検証ルールに違反している場合に返されるステータスコードです。GitHub API では、リクエストボディのフィールド値が不正、重複、無効な状態、または不足している時に発生します。このエラーは 400 系の汎用的なクライアントエラーとは異なり、**データの意味的な問題**を指摘します。

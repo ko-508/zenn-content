@@ -6,6 +6,11 @@ topics: ["azure", "error"]
 published: true
 ---
 
+:::message
+本記事は技術エラー解説サイト [errorlog.jp](https://errorlog.jp/) からの転載です。最新の内容と関連エラーの一覧は元記事を参照してください。
+元記事: https://errorlog.jp/posts/azure_400/
+:::
+
 ## エラーの概要
 
 Azure 400エラーは「Bad Request」を意味し、Azure APIへのリクエストに含まれるパラメータや値に誤りがある場合に発生します。これは認証エラーではなく、リクエストの内容そのものが仕様に違反していることを示す重要な信号です。Azure PortalやAzure CLI、REST APIを通じてリソースを作成・更新する際に頻繁に遭遇するエラーであり、適切な対応により確実に解決できます。
@@ -50,7 +55,7 @@ import requests
 payload = {
     "properties": {
         "adminUsername": "azureuser",
-        # adminUserPassword が不足している
+        # adminPassword が不足している
         "osProfile": {
             "computerName": "myvm"
         }
@@ -72,7 +77,7 @@ import requests
 payload = {
     "properties": {
         "adminUsername": "azureuser",
-        "adminUserPassword": "P@ssw0rd!Secure123",  # 必須パラメータを追加
+        "adminPassword": "P@ssw0rd!Secure123",  # 必須パラメータを追加
         "osProfile": {
             "computerName": "myvm"
         }
@@ -89,7 +94,7 @@ print(response.status_code)
 
 ### 原因2：リソース名の命名規則違反
 
-Azure リソース名には文字数制限および使用可能文字に関する厳格なルールが存在します。仮想マシンは最大15文字で英数字とハイフンのみ使用可能、ストレージアカウントは最大24文字で小文字英数字のみという具合に、リソースの種類ごとに異なる規則が適用されます。これらの規則を超えたり違反する文字を含めたりすると400エラーが返されます。
+Azure リソース名には文字数制限および使用可能文字に関する厳格なルールが存在します。仮想マシンは最大15文字で英数字とハイフンのみ使用可能、ストレージアカウントは最大24文字で小文字英数字のみという具合に、リソースの種類ごとに異なる規則が適用されます。これらの規則を超えたり違反する文字を含めたりするとエラーが返されます。
 
 **Before（エラーが起きるコード）：**
 
@@ -137,7 +142,7 @@ az storage account create \
 
 ## ツール固有の注意点
 
-**Azure REST APIの場合**：エラーレスポンスの `details` フィールドを必ず確認してください。ここに具体的な問題パラメータと制約条件が記載されます。複数のパラメータに問題がある場合も、`details` 配列内に全て列挙されることがあります。また、APIバージョン（`api-version` クエリパラメータ）が古すぎたり新しすぎたりする場合も400エラーになるため、Microsoft公式ドキュメントで対象リソースの最新APIバージョンを確認することが重要です。
+**Azure REST APIの場合**：エラーレスポンスの `details` フィールドを必ず確認してください。ここに具体的な問題パラメータと制約条件が記載されます。複数のパラメータに問題がある場合も、`details` 配列内に全て列挙されることがあります。また、APIバージョン（`api-version` クエリパラメータ）が古すぎたり新しすぎたりする場合もエラーになるため、Microsoft公式ドキュメントで対象リソースの最新APIバージョンを確認することが重要です。
 
 **Azure CLIの場合**：`--debug` フラグを付与することで、送信されるペイロード全体をコンソールに出力できます。これにより、CLIが実際に何を送信しているかを検証でき、デバッグが格段に容易になります。例えば `az vm create ... --debug` とすると、REST APIの完全なリクエストボディが表示されます。
 

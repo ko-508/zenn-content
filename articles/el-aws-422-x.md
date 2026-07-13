@@ -6,6 +6,11 @@ topics: ["aws", "error"]
 published: true
 ---
 
+:::message
+本記事は技術エラー解説サイト [errorlog.jp](https://errorlog.jp/) からの転載です。最新の内容と関連エラーの一覧は元記事を参照してください。
+元記事: https://errorlog.jp/posts/aws_422/
+:::
+
 ## エラーの概要
 
 AWS における 422 Unprocessable Entity は、HTTP リクエストの形式は正しいが、含まれるデータが処理不可能または検証に失敗したことを示します。CloudFormation、API Gateway、Lambda、EventBridge、DynamoDB など複数のAWSサービスで発生する可能性があります。このエラーが返されるのは、リクエストの構文は valid だが、ビジネスロジックレベルでの矛盾や制約違反があるためです。
@@ -212,7 +217,7 @@ EventBridge にルールを追加する際、イベントパターンの JSON �
 
 CloudFormation テンプレートのエラー詳細は AWS CloudFormation コンソールの「Events」タブで確認できます。詳細なエラーメッセージが表示されるため、ここから原因を特定することが多いです。
 
-API Gateway 経由のエラーの場合、CloudWatch Logs で API のexecution ログを有効化し、詳細なリクエスト・レスポンス情報を確認してください。ログは次のコマンドで確認できます:
+API Gateway 経由のエラーの場合、CloudWatch Logs で API の execution ログを有効化し、詳細なリクエスト・レスポンス情報を確認してください。ログは次のコマンドで確認できます:
 
 ```bash
 aws logs tail /aws/apigateway/<your-api-id> --follow

@@ -3,7 +3,7 @@ title: "Podman の 403 エラー：原因と解決策"
 emoji: "🚫"
 type: "tech"
 topics: ["podman", "error"]
-published: true
+published: false
 ---
 
 Podman で 403 エラーが発生した場合、認証には成功していますがリソースへのアクセス権限がない状態です。プライベートリポジトリへのアクセスやシステムのセキュリティポリシーが原因となることがほとんどです。

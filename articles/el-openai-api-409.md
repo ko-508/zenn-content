@@ -3,7 +3,7 @@ title: "OpenAI API の 409 エラー：原因と解決策"
 emoji: "🚫"
 type: "tech"
 topics: ["openai-api", "error"]
-published: true
+published: false
 ---
 
 OpenAI API で 409 エラーが返される場合、リクエストの内容がサーバー上のリソースの現在の状態と競合しています。通常、既に進行中の操作や重複したリソースが原因となります。

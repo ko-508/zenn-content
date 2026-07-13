@@ -6,6 +6,11 @@ topics: ["azure", "error"]
 published: true
 ---
 
+:::message
+本記事は技術エラー解説サイト [errorlog.jp](https://errorlog.jp/) からの転載です。最新の内容と関連エラーの一覧は元記事を参照してください。
+元記事: https://errorlog.jp/posts/azure_500/
+:::
+
 ## エラーの概要
 
 Azure 500エラーは、Azureのサーバー側で予期しない内部エラーが発生したことを示すHTTPステータスコードです。クライアント側に問題がなく、Azureインフラストラクチャ自体に一時的な障害が生じている状態を指します。このエラーが発生すると、リソースへのアクセスやデプロイメント、API呼び出しなどが中断され、進行中の処理は失敗に終わります。
@@ -26,54 +31,104 @@ Azure Portal、Azure CLIまたはREST APIを使用する際に以下のような
 
 ```bash
 $ az vm create --resource-group <your-resource-group> --name <your-vm-name> --image UbuntuLTS
-InternalServerError: An internal server error occurred. Please retry your request.
-RequestId: 12345678-1234-1234-1234-123456789012
+InternalServerError: An internal server error occurred while processing your request. Please try again later.
+```
+
+```json
+{
+  "error": {
+    "code": "500",
+    "message": "Internal Server Error",
+    "target": "/subscriptions/<subscription-id>/resourceGroups/<resource-group>/providers/Microsoft.Compute/virtualMachines/<vm-name>"
+  }
+}
 ```
 
 ## よくある原因と解決手順
 
-### 原因1：Azureインフラの一時的な障害
+### 原因1：リソースプロバイダーの登録が不完全またはタイムアウト
 
-Azureのグローバルインフラストラクチャでは、稀に一時的な障害が発生します。これは大規模なシステムメンテナンス、ネットワーク障害、またはデータセンター内の機器トラブルなどが原因で起こります。この場合、ユーザー側のコードやリソース設定に問題はなく、Azureのサービス側で自動的に復旧を試みています。
+Azureではリソースを作成する前に対応するリソースプロバイダーを登録する必要があります。登録プロセスが完了していない場合やタイムアウトした場合に500エラーが発生します。
 
-**修正例：**
+**Before（エラーが起きるコード）：**
 
 ```bash
-#!/bin/bash
-
-# 最大3回まで再試行する関数
-retry_command() {
-  local max_attempts=3
-  local attempt=1
-  
-  while [ $attempt -le $max_attempts ]; do
-    echo "試行 $attempt / $max_attempts..."
-    
-    if az group create --name myResourceGroup --location eastus; then
-      echo "成功しました"
-      return 0
-    fi
-    
-    if [ $attempt -lt $max_attempts ]; then
-      echo "30秒待機してから再試行します..."
-      sleep 30
-    fi
-    
-    attempt=$((attempt + 1))
-  done
-  
-  echo "最大再試行回数に達しました。Azureサポートにお問い合わせください。"
-  return 1
-}
-
-retry_command
+# リソースプロバイダーを確認せずにVM作成を試みる
+az vm create --resource-group myResourceGroup --name myVM --image UbuntuLTS
 ```
 
-### 原因2：リソースのデプロイ中における内部処理の失敗
+**After（修正後）：**
 
-Azure Resource Manager（ARM）テンプレートやBicepテンプレートを使用してリソースをデプロイする際、複雑なテンプレート処理やネストされたリソース作成の途中で500エラーが発生することがあります。特に大量のリソースを一度にデプロイしたり、依存関係が複雑になったりした場合、バックエンド処理がタイムアウト（待機中に時間制限に達する）または例外をスローします。
+```bash
+# 必要なリソースプロバイダーを登録
+az provider register --namespace Microsoft.Compute
+az provider register --namespace Microsoft.Network
+az provider register --namespace Microsoft.Storage
 
-**問題のあるテンプレート：**
+# 登録の完了を確認
+az provider show --namespace Microsoft.Compute --query "registrationState"
+
+# その後でリソース作成を実行
+az vm create --resource-group myResourceGroup --name myVM --image UbuntuLTS
+```
+
+### 原因2：クォータ制限または容量超過
+
+サブスクリプション内のリソース作成がクォータ制限に達していたり、特定のリージョンの容量が不足している場合に発生します。
+
+**Before（エラーが起きるコード）：**
+
+```bash
+# クォータ確認なしに大量のVMを作成
+for i in {1..100}; do
+  az vm create --resource-group myResourceGroup --name myVM-$i --image UbuntuLTS
+done
+```
+
+**After（修正後）：**
+
+```bash
+# 事前にクォータ使用量を確認
+az vm list-usage --location eastus --query "[?name.value=='cores']"
+
+# 必要に応じてクォータ増加をリクエスト
+az support tickets create \
+  --resource-group myResourceGroup \
+  --title "CPU Quota Increase Request" \
+  --severity minimal \
+  --contact-method email
+
+# 別のリージョンでリソース作成を検討
+az vm create --resource-group myResourceGroup --name myVM --image UbuntuLTS --location westus
+```
+
+### 原因3：ARM テンプレートの構文エラーまたはスキーマの非互換性
+
+Azure Resource Manager（ARM）テンプレートで構文エラーがあったり、APIバージョンが古い場合に500エラーが発生します。
+
+**Before（エラーが起きるコード）：**
+
+```json
+{
+  "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "resources": [
+    {
+      "type": "Microsoft.Compute/virtualMachines",
+      "apiVersion": "2015-06-15",
+      "name": "myVM",
+      "location": "[resourceGroup().location]",
+      "properties": {
+        "hardwareProfile": {
+          "vmSize": "Standard_A0"
+        }
+      }
+    }
+  ]
+}
+```
+
+**After（修正後）：**
 
 ```json
 {
@@ -82,38 +137,24 @@ Azure Resource Manager（ARM）テンプレートやBicepテンプレートを�
   "resources": [
     {
       "type": "Microsoft.Compute/virtualMachines",
-      "apiVersion": "2021-07-01",
-      "name": "vm-complex-setup",
+      "apiVersion": "2023-03-01",
+      "name": "myVM",
       "location": "[resourceGroup().location]",
       "properties": {
         "hardwareProfile": {
-          "vmSize": "Standard_D4s_v3"
+          "vmSize": "Standard_B2s"
         },
         "osProfile": {
           "computerName": "myVM",
-          "adminUsername": "azureuser",
-          "adminPassword": "[parameters('adminPassword')]"
+          "adminUsername": "azureuser"
         },
         "storageProfile": {
           "imageReference": {
             "publisher": "Canonical",
             "offer": "UbuntuServer",
-            "sku": "18_04-lts-gen2",
+            "sku": "18.04-LTS",
             "version": "latest"
-          },
-          "osDisk": {
-            "createOption": "FromImage",
-            "managedDisk": {
-              "storageAccountType": "Premium_LRS"
-            }
           }
-        },
-        "networkProfile": {
-          "networkInterfaces": [
-            {
-              "id": "[resourceId('Microsoft.Network/networkInterfaces', 'nic-1')]"
-            }
-          ]
         }
       }
     }
@@ -121,176 +162,134 @@ Azure Resource Manager（ARM）テンプレートやBicepテンプレートを�
 }
 ```
 
-**修正後（分割したテンプレート）：**
+### 原因4：ネットワークセキュリティグループ（NSG）またはファイアウォール規則の設定ミス
 
-```json
-{
-  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
-  "contentVersion": "1.0.0.0",
-  "resources": [
-    {
-      "type": "Microsoft.Storage/storageAccounts",
-      "apiVersion": "2021-06-01",
-      "name": "[parameters('storageAccountName')]",
-      "location": "[resourceGroup().location]",
-      "kind": "StorageV2",
-      "sku": {
-        "name": "Standard_LRS"
-      },
-      "properties": {
-        "accessTier": "Hot"
-      }
-    },
-    {
-      "type": "Microsoft.Network/networkInterfaces",
-      "apiVersion": "2021-02-01",
-      "name": "nic-primary",
-      "location": "[resourceGroup().location]",
-      "dependsOn": [
-        "[resourceId('Microsoft.Network/virtualNetworks/subnets', 'vnet-1', 'subnet-1')]"
-      ],
-      "properties": {
-        "ipConfigurations": [
-          {
-            "name": "ipconfig1",
-            "properties": {
-              "subnet": {
-                "id": "[resourceId('Microsoft.Network/virtualNetworks/subnets', 'vnet-1', 'subnet-1')]"
-              }
-            }
-          }
-        ]
-      }
-    }
-  ]
-}
-```
+NSGやAzure Firewallの設定が不適切な場合、内部通信がブロックされて500エラーが発生することがあります。
 
-複数のデプロイメントを分割して実行するスクリプト：
+**Before（エラーが起きるコード）：**
 
 ```bash
-#!/bin/bash
+# すべてのインバウンドを拒否するNSGを作成
+az network nsg create --resource-group myResourceGroup --name myNSG
 
-# ステップ1：ネットワークリソースをデプロイ
-echo "ステップ1：ネットワークをデプロイしています..."
-az deployment group create \
-  --resource-group myResourceGroup \
-  --template-file network-template.json \
-  --parameters networkParams.json
-
-if [ $? -ne 0 ]; then
-  echo "ネットワークデプロイに失敗しました"
-  exit 1
-fi
-
-sleep 10
-
-# ステップ2：ストレージアカウントをデプロイ
-echo "ステップ2：ストレージアカウントをデプロイしています..."
-az deployment group create \
-  --resource-group myResourceGroup \
-  --template-file storage-template.json \
-  --parameters storageParams.json
-
-if [ $? -ne 0 ]; then
-  echo "ストレージデプロイに失敗しました"
-  exit 1
-fi
-
-sleep 10
-
-# ステップ3：仮想マシンをデプロイ
-echo "ステップ3：仮想マシンをデプロイしています..."
-az deployment group create \
-  --resource-group myResourceGroup \
-  --template-file vm-template.json \
-  --parameters vmParams.json
+az network nsg rule create --resource-group myResourceGroup \
+  --nsg-name myNSG \
+  --name DenyAllInbound \
+  --priority 100 \
+  --direction Inbound \
+  --access Deny \
+  --protocol '*'
 ```
 
-### 原因3：APIリクエストレートの制限または過度なリソース消費
-
-Azure APIには呼び出しレート制限（一定時間に許可される呼び出し回数の上限）が存在します。短時間に大量のAPIリクエストを送信したり、リソースが膨大なデータ処理を実行しようとしたりすると、バックエンド側の処理キューがオーバーフローして500エラーが返されます。特に自動化スクリプトやプログラマティックなリソース管理で並列処理を使用している場合、この問題が顕在化しやすいです。
-
-**問題のあるコード（並列処理が過度）：**
-
-```python
-import azure.mgmt.compute
-from azure.identity import DefaultAzureCredential
-import concurrent.futures
-
-credential = DefaultAzureCredential()
-compute_client = azure.mgmt.compute.ComputeManagementClient(
-    credential, "<subscription-id>"
-)
-
-resource_group = "<your-resource-group>"
-vm_names = [f"vm-{i}" for i in range(100)]
-
-# 並列処理で100個のVMを一度に削除しようとする
-with concurrent.futures.ThreadPoolExecutor(max_workers=50) as executor:
-    futures = [
-        executor.submit(
-            compute_client.virtual_machines.begin_delete,
-            resource_group, vm_name
-        )
-        for vm_name in vm_names
-    ]
-    concurrent.futures.wait(futures)
-```
-
-**修正後（順序処理と待機間隔を追加）：**
-
-```python
-import azure.mgmt.compute
-from azure.identity import DefaultAzureCredential
-import time
-
-credential = DefaultAzureCredential()
-compute_client = azure.mgmt.compute.ComputeManagementClient(
-    credential, "<subscription-id>"
-)
-
-resource_group = "<your-resource-group>"
-vm_names = [f"vm-{i}" for i in range(100)]
-
-# 1つずつ削除し、各操作の間隔を2秒開ける
-for i, vm_name in enumerate(vm_names):
-    try:
-        print(f"削除中: {vm_name} ({i+1}/{len(vm_names)})")
-        operation = compute_client.virtual_machines.begin_delete(
-            resource_group, vm_name
-        )
-        operation.wait()  # 操作完了を待機
-        time.sleep(2)  # APIレート制限回避のための待機
-        
-    except Exception as e:
-        print(f"エラー: {vm_name} - {str(e)}")
-        time.sleep(10)  # エラー時はさらに長く待機
-        continue
-```
-
-## ツール固有の注意点
-
-**Azure Portal経由でのエラー発生**
-
-Azure Portal上での操作中に500エラーが発生した場合、まず [status.azure.com](https://status.azure.com) で対象リージョンのステータスを確認してください。ポータル上のバナーに表示されることもあります。ブラウザーキャッシュをクリアして再度操作を試みることも有効です。
-
-**Azure CLI での RequestID の確認**
-
-Azure CLI経由でエラーが発生した際、出力メッセージに `RequestId` が含まれています。このIDはAzure Supportへの問い合わせ時に不可欠です。以下のようにコマンド出力をファイルに保存しておくことをお勧めします。
+**After（修正後）：**
 
 ```bash
-az deployment group create \
-  --resource-group myResourceGroup \
-  --template-file template.json \
-  2>&1 | tee deployment.log
+# 必要なトラフィックのみを許可するNSGルールを作成
+az network nsg rule create --resource-group myResourceGroup \
+  --nsg-name myNSG \
+  --name AllowHTTP \
+  --priority 100 \
+  --direction Inbound \
+  --access Allow \
+  --protocol Tcp \
+  --source-address-prefixes '*' \
+  --destination-port-ranges 80
+
+az network nsg rule create --resource-group myResourceGroup \
+  --nsg-name myNSG \
+  --name AllowHTTPS \
+  --priority 101 \
+  --direction Inbound \
+  --access Allow \
+  --protocol Tcp \
+  --source-address-prefixes '*' \
+  --destination-port-ranges 443
 ```
 
-保存したログファイルからRequestIDを抽出できます。
+## Azure 固有の注意点
+
+### App Service での 500 エラー
+
+Azure App Service でアプリケーションが500エラーを返す場合、アプリケーション自体の問題とプラットフォーム側の問題を区別する必要があります。以下のコマンドで診断設定を有効にして詳細なログを確認してください。
 
 ```bash
-grep "RequestId" deployment.log
+# App Service の詳細ログを有効化
+az webapp log config --name <your-app-name> --resource-group <your-resource-group> \
+  --web-server-logging filesystem --detailed-error-messages true
+
+# ログをダウンロードして確認
+az webapp log download --name <your-app-name> --resource-group <your-resource-group> \
+  --log-file appservice.zip
 ```
+
+### Azure SQL Database との接続エラー
+
+バックエンドのSQL Databaseに接続できない場合も500エラーが発生します。ファイアウォール規則とVNet統合設定を確認してください。
+
+```bash
+# SQL Serverのファイアウォール規則を確認
+az sql server firewall-rule list --resource-group <your-resource-group> \
+  --server <your-server-name>
+
+# アプリケーションが配置されている場所からのアクセスを許可
+az sql server firewall-rule create --resource-group <your-resource-group> \
+  --server <your-server-name> \
+  --name AllowAzureServices \
+  --start-ip-address 0.0.0.0 \
+  --end-ip-address 0.0.0.0
+```
+
+### API Management での 500 エラー
+
+Azure API Managementを経由している場合、ポリシー設定やバックエンドの設定ミスが原因となります。ポリシー検証とバックエンドのヘルスチェックを実行してください。
+
+```bash
+# バックエンド APIのヘルスプローブ設定を確認
+az apim backend show --resource-group <your-resource-group> \
+  --service-name <your-apim-name> \
+  --backend-id <your-backend-id>
+
+# ポリシー設定の構文を検証
+az apim api policy show --resource-group <your-resource-group> \
+  --service-name <your-apim-name> \
+  --api-id <your-api-id>
+```
+
+## それでも解決しない場合
+
+### ログの確認方法
+
+Azure Monitor を利用して詳細なエラーログを確認することができます。
+
+```bash
+# Azure Monitor で過去1時間のエラーログを検索
+az monitor metrics list --resource <your-resource-id> \
+  --metric "FailedRequests" \
+  --start-time 2024-01-01T00:00:00Z \
+  --interval PT1M
+
+# Application Insights でトレースを確認
+az monitor app-insights query --app <your-app-insights-name> \
+  --analytics-query "requests | where resultCode == 500 | project timestamp, name, resultCode, duration"
+```
+
+### Azure Support への相談
+
+問題が継続する場合は、Azure サポートに問い合わせてください。事前に以下の情報を準備しておくと対応が迅速になります。
+
+- リソースの種類（App Service、VM、API Management など）
+- 発生時刻と時間帯
+- 実行していた操作の詳細
+- Azure Monitor または Application Insights からのログ出力
+- サブスクリプション ID とリソースグループ名
+
+### 公式ドキュメント
+
+以下のドキュメントを参照して詳細を確認してください。
+
+- [Azure サービスの正常性状態を確認](https://status.azure.com/)
+- [Azure トラブルシューティング ガイド](https://learn.microsoft.com/ja-jp/azure/cloud-adoption-framework/ready/consideration/connectivity-to-azure)
+- [ARM テンプレートのベストプラクティス](https://learn.microsoft.com/ja-jp/azure/azure-resource-manager/templates/best-practices)
 
 ---
 

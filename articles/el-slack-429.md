@@ -3,7 +3,7 @@ title: "Slack の 429 エラー：原因と解決策"
 emoji: "💬"
 type: "tech"
 topics: ["slack", "error"]
-published: true
+published: false
 ---
 
 ## Slack 429 エラーの原因と解決策

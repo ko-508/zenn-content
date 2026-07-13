@@ -3,7 +3,7 @@ title: "Supabase の 429 エラー：原因と解決策"
 emoji: "🚫"
 type: "tech"
 topics: ["supabase", "error"]
-published: true
+published: false
 ---
 
 ## エラーの概要

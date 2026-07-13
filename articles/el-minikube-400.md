@@ -3,7 +3,7 @@ title: "Minikube の 400 エラー：原因と解決策"
 emoji: "🚫"
 type: "tech"
 topics: ["minikube", "error"]
-published: true
+published: false
 ---
 
 Minikubeクラスターへのリクエスト形式が正しくなく、マニフェストのYAML構文エラーやオプション指定の誤りが原因で発生するエラーです。本記事では原因特定と解決方法をステップバイステップで解説します。

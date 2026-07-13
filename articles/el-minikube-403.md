@@ -3,7 +3,7 @@ title: "Minikube の 403 エラー：原因と解決策"
 emoji: "🚫"
 type: "tech"
 topics: ["minikube", "error"]
-published: true
+published: false
 ---
 
 Minikubeでリソースへのアクセスを試みたときに403エラーが返される場合、RBAC（ロールベースアクセス制御）設定によってアクセス権限が拒否されています。このエラーは開発環境でも本番環境でも発生し、適切な権限設定で解決します。

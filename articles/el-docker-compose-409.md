@@ -6,6 +6,11 @@ topics: ["docker-compose", "error"]
 published: true
 ---
 
+:::message
+本記事は技術エラー解説サイト [errorlog.jp](https://errorlog.jp/) からの転載です。最新の内容と関連エラーの一覧は元記事を参照してください。
+元記事: https://errorlog.jp/posts/docker_compose_409/
+:::
+
 ## エラーの概要
 
 Docker Compose の 409 エラーは、リクエストされたコンテナーやネットワーク、ボリュームの状態が現在の環境状態と競合していることを示します。このエラーは通常、既に存在するリソースの作成を試みたり、使用中のポート・ネットワークを重複させたりした場合に発生します。既存の状態を認識しないまま操作を進めようとすると、Docker Compose がこの競合を検出して実行を中止します。

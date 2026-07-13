@@ -3,7 +3,7 @@ title: "Podman の 400 エラー：原因と解決策"
 emoji: "🚫"
 type: "tech"
 topics: ["podman", "error"]
-published: true
+published: false
 ---
 
 Podman実行時に「400 Bad Request」が出ています。このエラーはPodman APIまたはレジストリへのリクエスト形式が正しくないことを示しており、コマンドオプションやイメージ指定の誤りが原因です。

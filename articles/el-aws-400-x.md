@@ -6,6 +6,11 @@ topics: ["aws", "error"]
 published: true
 ---
 
+:::message
+本記事は技術エラー解説サイト [errorlog.jp](https://errorlog.jp/) からの転載です。最新の内容と関連エラーの一覧は元記事を参照してください。
+元記事: https://errorlog.jp/posts/aws_400/
+:::
+
 ## エラーの概要
 
 AWS の HTTP 400 エラーは「Bad Request（不正なリクエスト）」を意味し、AWS API に送信されたリクエストに構文的な誤りや不正なパラメータが含まれている場合に返されます。AWS では API Gateway、S3、DynamoDB、Lambda、IAM など複数のサービスで発生する可能性があり、クライアント側の設定ミスやリクエスト形式の誤りが主な原因となります。

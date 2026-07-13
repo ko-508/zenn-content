@@ -6,6 +6,11 @@ topics: ["azure", "error"]
 published: true
 ---
 
+:::message
+本記事は技術エラー解説サイト [errorlog.jp](https://errorlog.jp/) からの転載です。最新の内容と関連エラーの一覧は元記事を参照してください。
+元記事: https://errorlog.jp/posts/azure_404/
+:::
+
 ## エラーの概要
 
 Azureの404エラーは、APIやポータルからアクセスしようとしたリソースが見つからないことを示すHTTPエラーです。このエラーが発生すると、指定したリソース名、リソースID、あるいはAPIエンドポイントが存在しないか、アクセス権限がない状態を意味します。Azure CLIやREST API、Azure Portalを通じてリソースを操作する際に頻繁に遭遇するエラーであり、原因の特定と対処には体系的なアプローチが必要です。

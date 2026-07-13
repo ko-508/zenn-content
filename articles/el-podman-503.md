@@ -3,7 +3,7 @@ title: "Podman の 503 エラー：原因と解決策"
 emoji: "🚫"
 type: "tech"
 topics: ["podman", "error"]
-published: true
+published: false
 ---
 
 Podman の 503 エラーが発生した場合、Podman API サービスやコンテナレジストリが一時的に利用できない状態です。以下の手順で原因を特定し、解決します。

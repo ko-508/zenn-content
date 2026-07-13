@@ -3,7 +3,7 @@ title: "Firebase の 408 エラー：原因と解決策"
 emoji: "🔥"
 type: "tech"
 topics: ["firebase", "error"]
-published: true
+published: false
 ---
 
 Firebase 408 エラーはクライアント側からのリクエストがタイムアウト時間内に完了できず、Firebase サーバーが接続を切断した状態です。ネットワーク環境またはアプリケーションの処理速度が原因となります。

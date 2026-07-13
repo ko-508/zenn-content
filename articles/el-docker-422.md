@@ -6,6 +6,11 @@ topics: ["docker", "error"]
 published: true
 ---
 
+:::message
+本記事は技術エラー解説サイト [errorlog.jp](https://errorlog.jp/) からの転載です。最新の内容と関連エラーの一覧は元記事を参照してください。
+元記事: https://errorlog.jp/posts/docker_422/
+:::
+
 ## エラーの概要
 
 Dockerで 422 エラーが発生するのは、Docker APIまたはコンテナレジストリへのリクエストが構文的には正しいものの、含まれるデータが処理要件を満たしていない場合です。Docker Daemon、Docker Compose、レジストリ APIとの通信時にこのエラーが返される典型的なシナリオは、不正なイメージタグ指定、設定値の型違反、あるいは APIスキーマの検証失敗です。

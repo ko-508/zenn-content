@@ -3,7 +3,7 @@ title: "Slack の 500 エラー：原因と解決策"
 emoji: "💬"
 type: "tech"
 topics: ["slack", "error"]
-published: true
+published: false
 ---
 
 Slack API利用時に500エラーが返される場合、Slack側のサーバーで予期しない内部エラーが発生しています。ほとんどのケースは一時的な障害ですが、適切な対応手順を踏む必要があります。

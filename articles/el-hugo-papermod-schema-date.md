@@ -6,6 +6,11 @@ topics: ["hugo", "error"]
 published: true
 ---
 
+:::message
+本記事は技術エラー解説サイト [errorlog.jp](https://errorlog.jp/) からの転載です。最新の内容と関連エラーの一覧は元記事を参照してください。
+元記事: https://errorlog.jp/posts/hugo_papermod_schema_date/
+:::
+
 ## エラーの概要
 
 Hugo（PaperMod テーマ）で構築したサイトの構造化データ（JSON-LD）を Google のリッチリザルトテストで確認したところ、`datePublished` と `dateModified` に `0001-01-01T00:00:00Z` という明らかに誤った日付が出力されていた。記事のフロントマターには正しく `date: 2026-05-29` を設定していたにもかかわらず、構造化データには Go の「ゼロ値」に相当する日付が混入していた。

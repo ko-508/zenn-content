@@ -3,7 +3,7 @@ title: "Podman の 500 エラー：原因と解決策"
 emoji: "🚫"
 type: "tech"
 topics: ["podman", "error"]
-published: true
+published: false
 ---
 
 Podman 500 エラーは内部的な予期しないエラーが発生したことを示す深刻なエラーです。ストレージ破損やディスク容量不足が原因となることが多いため、段階的に対処する必要があります。

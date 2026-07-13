@@ -6,6 +6,11 @@ topics: ["docker-compose", "error"]
 published: true
 ---
 
+:::message
+本記事は技術エラー解説サイト [errorlog.jp](https://errorlog.jp/) からの転載です。最新の内容と関連エラーの一覧は元記事を参照してください。
+元記事: https://errorlog.jp/posts/docker_compose_503/
+:::
+
 ## エラーの概要
 
 503エラーは「Service Unavailable」を意味し、Docker Composeでは依存するサービスが正常に起動できていない、または起動完了前にアクセスされている状況を示します。マイクロサービスアーキテクチャではよく発生するエラーで、特に複数コンテナーの起動順序やヘルスチェック設定に起因することが多いです。

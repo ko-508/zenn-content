@@ -6,6 +6,11 @@ topics: ["docker-compose", "error"]
 published: true
 ---
 
+:::message
+本記事は技術エラー解説サイト [errorlog.jp](https://errorlog.jp/) からの転載です。最新の内容と関連エラーの一覧は元記事を参照してください。
+元記事: https://errorlog.jp/posts/docker_compose_403/
+:::
+
 ## エラーの概要
 
 Docker Compose で 403 エラーが発生する場合、これはレジストリ（Docker Hub、プライベートレジストリなど）またはホストマシンのリソースに対して、実行ユーザーが十分なアクセス権限を持っていないことを示しています。プライベートイメージの pull、ボリュームマウント時のファイルアクセス、Docker ソケットへのアクセスなど、複数の場面で発生する可能性があります。

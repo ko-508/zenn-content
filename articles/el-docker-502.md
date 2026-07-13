@@ -6,6 +6,11 @@ topics: ["docker", "error"]
 published: true
 ---
 
+:::message
+本記事は技術エラー解説サイト [errorlog.jp](https://errorlog.jp/) からの転載です。最新の内容と関連エラーの一覧は元記事を参照してください。
+元記事: https://errorlog.jp/posts/docker_502/
+:::
+
 ## エラーの概要
 
 502 Bad Gateway は、Docker コンテナ内で実行されるアプリケーションやリバースプロキシが、上流のサーバーから不正な応答を受け取ったときに発生します。Docker Compose や Kubernetes でマルチコンテナを運用する環境では、コンテナ間通信の失敗、プロキシ設定のミス、ネットワーク分断などが典型的な原因です。特に、Nginx や Apache をリバースプロキシとして使用している場合に頻出します。

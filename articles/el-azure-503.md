@@ -6,6 +6,11 @@ topics: ["azure", "error"]
 published: true
 ---
 
+:::message
+本記事は技術エラー解説サイト [errorlog.jp](https://errorlog.jp/) からの転載です。最新の内容と関連エラーの一覧は元記事を参照してください。
+元記事: https://errorlog.jp/posts/azure_503/
+:::
+
 ## エラーの概要
 
 Azure 503 エラーは「Service Unavailable」を意味し、Azureサービスが一時的に利用できない状態を示します。リクエストがサーバーに到達しても、システムの過負荷、メンテナンス、インフラ障害などによってレスポンスを返すことができません。このエラーは一時的な場合が多いため、リトライ戦略を実装することが重要です。

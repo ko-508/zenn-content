@@ -3,7 +3,7 @@ title: "Minikube の 503 エラー：原因と解決策"
 emoji: "🚫"
 type: "tech"
 topics: ["minikube", "error"]
-published: true
+published: false
 ---
 
 Minikubeでサービスにアクセスしたときに503エラーが返される場合、クラスター自体が正常に動作していないか、デプロイしたサービスが停止している状態です。この記事では、原因の特定方法と解決手順を説明します。

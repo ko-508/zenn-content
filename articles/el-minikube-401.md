@@ -3,7 +3,7 @@ title: "Minikube の 401 エラー：原因と解決策"
 emoji: "🚫"
 type: "tech"
 topics: ["minikube", "error"]
-published: true
+published: false
 ---
 
 Minikubeへの認証に失敗して401エラーが発生します。このエラーは kubeconfig の設定が Minikube クラスターと一致していない場合に起こります。

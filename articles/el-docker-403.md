@@ -6,6 +6,11 @@ topics: ["docker", "error"]
 published: true
 ---
 
+:::message
+本記事は技術エラー解説サイト [errorlog.jp](https://errorlog.jp/) からの転載です。最新の内容と関連エラーの一覧は元記事を参照してください。
+元記事: https://errorlog.jp/posts/docker_403/
+:::
+
 # エラーの概要
 
 Docker の 403 エラーは、認証（ログイン）には成功したものの、対象のリソース（イメージ、レジストリ、ボリューム等）へのアクセス権限がないことを示します。これはプライベートリポジトリへのアクセス、組織内のアクセス制限、または不十分な認証トークンの権限が原因で発生することがほとんどです。Docker CLI、Docker Desktop、または docker push/pull 時に頻繁に遭遇するエラーです。

@@ -6,9 +6,14 @@ topics: ["docker", "error"]
 published: true
 ---
 
+:::message
+本記事は技術エラー解説サイト [errorlog.jp](https://errorlog.jp/) からの転載です。最新の内容と関連エラーの一覧は元記事を参照してください。
+元記事: https://errorlog.jp/posts/docker_400/
+:::
+
 ## エラーの概要
 
-Docker の 400 エラーは、クライアント側のリクエストが不正な形式であることを示すHTTPステータスコードです。Docker デーモンとの通信（コンテナの操作、イメージのプッシュ・プル、API呼び出し）の際に、形式不正なリクエストが送信された場合に発生します。多くの場合、Dockerfile の構文エラー、APIリクエストの形式ミス、または設定ファイルの不正な記述が原因です。
+Dockerの400エラーは、クライアント側のリクエストが不正な形式であることを示すHTTPステータスコードです。Dockerデーモンとの通信（コンテナの操作、イメージのプッシュ・プル、API呼び出し）の際に、形式不正なリクエストが送信された場合に発生します。多くの場合、Dockerfileの構文エラー、APIリクエストの形式ミス、または設定ファイルの不正な記述が原因です。
 
 ## 実際のエラーメッセージ例
 
@@ -33,10 +38,10 @@ Error response from daemon: HTTP/400: Bad Request
 
 ## よくある原因と解決手順
 
-### 原因1：Dockerfile の RUN コマンドの構文エラー
+### 原因1：Dockerfileのrun コマンドの構文エラー
 
 **なぜ発生するか**
-Dockerfile の RUN コマンドで行末の区切り文字（バックスラッシュ）が正しく使われていないか、シェルコマンドの構文が不正な場合に、Docker デーモンが該当行を解析できず 400 エラーを返します。
+Dockerfileのコマンドで行末の区切り文字（バックスラッシュ）が正しく使われていないか、シェルコマンドの構文が不正な場合に、Dockerデーモンが該当行を解析できず400エラーを返します。
 
 **Before（エラーが起きる状態）**
 ```dockerfile
@@ -56,12 +61,12 @@ RUN apt-get update && \
 RUN echo "Installation complete"
 ```
 
-正しくは、継続する各行の末尾に `\` を記述し、改行をコマンドの一部として解釈させます。
+正しくは、継続する各行の末尾に`\`を記述し、改行をコマンドの一部として解釈させます。
 
-### 原因2：docker-compose.yml の YAML 形式の不正
+### 原因2：docker-compose.ymlのYAML形式の不正
 
 **なぜ発生するか**
-docker-compose ファイルでインデント（空白）が不規則であるか、キー名の引用符が不完全な場合、YAML パーサーが設定を読み込めず、Docker デーモンへのリクエストが不正な形式になります。
+docker-composeファイルでインデント（空白）が不規則であるか、キー名の引用符が不完全な場合、YAMLパーサーが設定を読み込めず、Dockerデーモンへのリクエストが不正な形式になります。
 
 **Before（エラーが起きる状態）**
 ```yaml
@@ -93,12 +98,12 @@ services:
       - ./html:/usr/share/nginx/html
 ```
 
-キー `NGINX_PORT` の値は `=` で区切り（`:`ではなく）、`volumes` のインデントを統一します。
+キー`NGINX_PORT`の値は`=`で区切り（`:`ではなく）、`volumes`のインデントを統一します。
 
-### 原因3：Docker API の JSON リクエスト形式が不正
+### 原因3：Docker APIのJSONリクエスト形式が不正
 
 **なぜ発生するか**
-Docker Remote API（HTTP で Docker デーモンと通信する場合）を使用する際、リクエストボディの JSON が不正な形式または必須フィールドが欠けている場合、400 エラーが返されます。
+DockerRemoteAPI（HTTPでDockerデーモンと通信する場合）を使用する際、リクエストボディのJSONが不正な形式または必須フィールドが欠けている場合、400エラーが返されます。
 
 **Before（エラーが起きる状態）**
 ```bash
@@ -110,7 +115,7 @@ curl -X POST http://localhost:2375/containers/create \
   }'
 ```
 
-JSON が不完全です（`"hello]` のクォートが閉じられていません）。
+JSONが不完全です（`"hello]`のクォートが閉じられていません）。
 
 **After（修正後）**
 ```bash
@@ -123,12 +128,12 @@ curl -X POST http://localhost:2375/containers/create \
   }'
 ```
 
-JSON の構文を正しく閉じ、必須フィールドを完成させます。
+JSONの構文を正しく閉じ、必須フィールドを完成させます。
 
-### 原因4：docker push 時のタグ形式の誤り
+### 原因4：docker push時のタグ形式の誤り
 
 **なぜ発生するか**
-Docker レジストリ（Docker Hub や プライベートレジストリ）にイメージをプッシュする際、タグ形式が不正であるか、認証情報が不足している場合、レジストリが 400 エラーを返します。
+Dockerレジストリ（DockerHubやプライベートレジストリ）にイメージをプッシュする際、タグ形式が不正であるか、認証情報が不足している場合、レジストリが400エラーを返します。
 
 **Before（エラーが起きる状態）**
 ```bash
@@ -137,7 +142,7 @@ docker push myregistry.com/myapp
 # Error response from daemon: HTTP/400: Bad Request
 ```
 
-タグに version が含まれていません。
+タグに版が含まれていません。
 
 **After（修正後）**
 ```bash
@@ -145,13 +150,13 @@ docker tag myapp:latest myregistry.com/myapp:latest
 docker push myregistry.com/myapp:latest
 ```
 
-レジストリ URL、リポジトリ名、タグを完全な形式で指定します。
+レジストリURL、リポジトリ名、タグを完全な形式で指定します。
 
-## Docker 固有の注意点
+## Docker固有の注意点
 
-### docker-compose ネットワーク設定でのエラー
+### docker-composeネットワーク設定でのエラー
 
-docker-compose で複数のサービス間の通信設定が不正な場合、400 エラーが発生することがあります。特に `networks` セクションで指定するネットワーク名やドライバーが不正であると、コンテナ起動時にデーモンがリクエストを拒否します。
+docker-composeで複数のサービス間の通信設定が不正な場合、400エラーが発生することがあります。特に`networks`セクションで指定するネットワーク名やドライバーが不正であると、コンテナ起動時にデーモンがリクエストを拒否します。
 
 ```yaml
 version: '3.8'
@@ -165,9 +170,9 @@ networks:
     driver: bridge
 ```
 
-### Docker ソケット接続時の権限問題
+### Dockerソケット接続時の権限問題
 
-Docker デーモンへの接続に使用される `/var/run/docker.sock` へのアクセス権がない場合、結果として 400 エラーとして報告されることがあります。ユーザーが `docker` グループに属していることを確認してください。
+Dockerデーモンへの接続に使用される`/var/run/docker.sock`へのアクセス権がない場合、結果として400エラーとして報告されることがあります。ユーザーが`docker`グループに属していることを確認してください。
 
 ```bash
 sudo usermod -aG docker $USER
@@ -176,7 +181,7 @@ newgrp docker
 
 ### レジストリ認証情報の不完全性
 
-Docker Hub や プライベートレジストリに認証なしでプッシュしようとした場合、サーバーが 400 エラーを返すことがあります。事前に `docker login` を実行してください。
+DockerHubやプライベートレジストリに認証なしでプッシュしようとした場合、サーバーが400エラーを返すことがあります。事前に`docker login`を実行してください。
 
 ```bash
 docker login
@@ -188,21 +193,21 @@ docker push myregistry.com/myapp:latest
 
 ### デバッグログの確認
 
-Docker デーモンの詳細ログを確認することで、エラーの正確な原因が判明することがあります。
+Dockerデーモンの詳細ログを確認することで、エラーの正確な原因が判明することがあります。
 
 ```bash
 dockerd --debug 2>&1 | grep -i "400\|bad request"
 ```
 
-または、Docker コマンドに `-D` フラグを追加して詳細情報を表示します。
+または、Dockerコマンドに`-D`フラグを追加して詳細情報を表示します。
 
 ```bash
 docker -D build -t myimage:latest .
 ```
 
-### Dockerfile のバリデーション
+### Dockerfileのバリデーション
 
-Dockerfile の構文を事前にチェックするには、Hadolint などのツールを使用してください。
+Dockerfileの構文を事前にチェックするには、Hadolintなどのツールを使用してください。
 
 ```bash
 hadolint Dockerfile
@@ -210,13 +215,13 @@ hadolint Dockerfile
 
 ### 公式ドキュメントの確認
 
-- [Docker Build reference](https://docs.docker.com/reference/dockerfile/) - Dockerfile の正確な構文
-- [Docker Compose specification](https://docs.docker.com/compose/compose-file/) - docker-compose.yml の仕様
-- [Docker Engine API](https://docs.docker.com/engine/api/) - Remote API の詳細
+- [Docker Build reference](https://docs.docker.com/reference/dockerfile/) - Dockerfileの正確な構文
+- [Docker Compose specification](https://docs.docker.com/compose/compose-file/) - docker-compose.ymlの仕様
+- [Docker Engine API](https://docs.docker.com/engine/api/) - RemoteAPIの詳細
 
 ### コミュニティリソース
 
-Docker の GitHub Issues や Stack Overflow で同様のエラーが報告されていないか検索してください。特に `docker-compose` や特定のバージョンでの互換性問題は GitHub の Issues で詳細が共有されていることが多いです。
+DockerのGitHub Issuesやstack Overflowで同様のエラーが報告されていないか検索してください。特に`docker-compose`や特定のバージョンでの互換性問題はGitHubのIssuesで詳細が共有されていることが多いです。
 
 ---
 

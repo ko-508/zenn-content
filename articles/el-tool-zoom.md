@@ -3,7 +3,7 @@ title: "Zoom とは？特徴・機能・料金・比較まとめ"
 emoji: "🔧"
 type: "tech"
 topics: ["tool-guide"]
-published: true
+published: false
 ---
 
 ## Zoom とは

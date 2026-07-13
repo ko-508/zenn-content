@@ -6,6 +6,11 @@ topics: ["docker", "error"]
 published: true
 ---
 
+:::message
+本記事は技術エラー解説サイト [errorlog.jp](https://errorlog.jp/) からの転載です。最新の内容と関連エラーの一覧は元記事を参照してください。
+元記事: https://errorlog.jp/posts/docker_504/
+:::
+
 ## エラーの概要
 
 504 Gateway Timeout は、Docker デーモンがプロキシ経由で上流サーバーへのリクエストに応答を待つ際に、設定されたタイムアウト時間を超過したことを示すHTTPステータスコードです。Docker Compose を使用している場合やリバースプロキシ（Nginx など）経由でコンテナにアクセスしている場合に頻繁に発生します。このエラーは、サーバー側の処理遅延、ネットワークの問題、またはタイムアウト設定の不適切さが原因となります。

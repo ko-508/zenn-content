@@ -6,6 +6,11 @@ topics: ["aws", "error"]
 published: true
 ---
 
+:::message
+本記事は技術エラー解説サイト [errorlog.jp](https://errorlog.jp/) からの転載です。最新の内容と関連エラーの一覧は元記事を参照してください。
+元記事: https://errorlog.jp/posts/aws_500/
+:::
+
 ## エラーの概要
 
 AWS における 500 Internal Server Error は、クライアント側のリクエストに問題はないにもかかわらず、AWS サービス側で予期しない障害が発生したことを示します。Lambda 関数の未処理例外やタイムアウト、API Gateway の統合エラー、CloudFormation のスタック操作失敗など、複数のサービスにまたがって発生しうるサーバーサイドの障害です。一時的な AWS 基盤の不具合である場合もありますが、大半はアプリケーションコードや設定の問題に起因します。

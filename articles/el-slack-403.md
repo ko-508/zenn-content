@@ -3,7 +3,7 @@ title: "Slack の 403 エラー：原因と解決策"
 emoji: "💬"
 type: "tech"
 topics: ["slack", "error"]
-published: true
+published: false
 ---
 
 ## Slack の 403 エラーの原因と解決方法
