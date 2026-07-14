@@ -11,217 +11,111 @@ published: true
 元記事: https://errorlog.jp/posts/docker_400/
 :::
 
+## 冒頭まとめ
+
+Docker の 400 Bad Request は、デーモンまで届いたリクエストの形式や値が不正で、デーモンが処理を始められなかったことを示します。実際の環境で最も多いのは、クライアントとデーモンの API バージョン不一致です。エラー文言が client version <番号> is too new（クライアントが新しすぎる）または too old（古すぎる）なら、これに該当します。新しい CLI やツールと古いデーモンの組み合わせ、CI の Docker-in-Docker 構成、DOCKER_API_VERSION 環境変数の固定ミスが典型です。そのほか、デーモンの API を直接呼び出す場合の壊れた JSON や、設定値の検証で弾かれるケースが400になります。
+
+逆に、400と誤解されやすいが400ではないものも押さえておくと迷いません。Dockerfile の構文エラーはビルド時の解析エラー、compose ファイルの YAML 不正はクライアント側の読み込みエラー、イメージ名の形式違反は invalid reference format としてデーモンに送る前に拒否されます。いずれもデーモンの400応答ではなく、調査の場所が異なります。
+
 ## エラーの概要
 
-Dockerの400エラーは、クライアント側のリクエストが不正な形式であることを示すHTTPステータスコードです。Dockerデーモンとの通信（コンテナの操作、イメージのプッシュ・プル、API呼び出し）の際に、形式不正なリクエストが送信された場合に発生します。多くの場合、Dockerfileの構文エラー、APIリクエストの形式ミス、または設定ファイルの不正な記述が原因です。
+docker コマンドは、裏側で Docker デーモンの API に HTTP リクエストを送るクライアントです。Error response from daemon: で始まるエラーは、リクエストがデーモンまで届いたことを意味します。デーモンは、不正なパラメータに分類されるエラーを 400 として応答する実装になっており（Docker のソースコードで確認できます）、API バージョンの範囲外もこの分類に含まれます。実際の報告に共通する文言は次の2種です。
 
-## 実際のエラーメッセージ例
-
-```
-docker build -t myimage:latest .
-Step 1/5 : FROM ubuntu:20.04
-Step 2/5 : RUN apt-get update && apt-get install -y curl
-Step 3/5 : COPY . /app
-Step 4/5 : WORKDIR /app
-Step 5/5 : RUN python script.py
-Error response from daemon: invalid header field value "oci runtime error"
-Error response from daemon: HTTP/400: Bad Request
+```text
+Error response from daemon: client version 1.52 is too new.
+Maximum supported API version is 1.43
 ```
 
-```json
-{
-  "message": "invalid request: malformed JSON in request body",
-  "code": 400,
-  "detail": "failed to decode request body"
-}
+```text
+Error response from daemon: client version 1.41 is too old.
+Minimum supported API version is 1.44
 ```
+
+too new はクライアントの要求する API バージョンがデーモンの上限を超えている状態、too old は逆に、デーモンが受け付ける下限より古い状態です。後者は、Docker Engine のバージョン29が受け付ける最小 API バージョンを引き上げたことに伴い、古いクライアントやツールを使う環境で報告が増えています。
+
+## まず最初に：文言で3つに分岐する
+
+client version ... is too new / too old なら、API バージョンの不一致です（原因1）。invalid という語を含む文言（不正な JSON、不正な設定値の指摘）なら、リクエストの中身の問題です（原因2・3）。dockerfile parse error、YAML の解析エラー、invalid reference format、Cannot connect to the Docker daemon のいずれかなら、それは400の問題ではありません（後述の補足へ）。
 
 ## よくある原因と解決手順
 
-### 原因1：Dockerfileのrun コマンドの構文エラー
+### 原因1：クライアントとデーモンの API バージョン不一致
 
-**なぜ発生するか**
-Dockerfileのコマンドで行末の区切り文字（バックスラッシュ）が正しく使われていないか、シェルコマンドの構文が不正な場合に、Dockerデーモンが該当行を解析できず400エラーを返します。
-
-**Before（エラーが起きる状態）**
-```dockerfile
-FROM ubuntu:20.04
-RUN apt-get update && \
-    apt-get install -y python3 \
-    curl
-RUN echo "Installation complete"
-```
-
-**After（修正後）**
-```dockerfile
-FROM ubuntu:20.04
-RUN apt-get update && \
-    apt-get install -y python3 \
-    curl
-RUN echo "Installation complete"
-```
-
-正しくは、継続する各行の末尾に`\`を記述し、改行をコマンドの一部として解釈させます。
-
-### 原因2：docker-compose.ymlのYAML形式の不正
-
-**なぜ発生するか**
-docker-composeファイルでインデント（空白）が不規則であるか、キー名の引用符が不完全な場合、YAMLパーサーが設定を読み込めず、Dockerデーモンへのリクエストが不正な形式になります。
-
-**Before（エラーが起きる状態）**
-```yaml
-version: '3.8'
-services:
-  web:
-    image: nginx:latest
-    ports:
-      - "80:80"
-    environment:
-      - NGINX_HOST=example.com
-      - NGINX_PORT: 80
-    volumes:
-    - ./html:/usr/share/nginx/html
-```
-
-**After（修正後）**
-```yaml
-version: '3.8'
-services:
-  web:
-    image: nginx:latest
-    ports:
-      - "80:80"
-    environment:
-      - NGINX_HOST=example.com
-      - NGINX_PORT=80
-    volumes:
-      - ./html:/usr/share/nginx/html
-```
-
-キー`NGINX_PORT`の値は`=`で区切り（`:`ではなく）、`volumes`のインデントを統一します。
-
-### 原因3：Docker APIのJSONリクエスト形式が不正
-
-**なぜ発生するか**
-DockerRemoteAPI（HTTPでDockerデーモンと通信する場合）を使用する際、リクエストボディのJSONが不正な形式または必須フィールドが欠けている場合、400エラーが返されます。
-
-**Before（エラーが起きる状態）**
-```bash
-curl -X POST http://localhost:2375/containers/create \
-  -H "Content-Type: application/json" \
-  -d '{
-    "Image": "ubuntu:20.04",
-    "Cmd": ["echo", "hello]
-  }'
-```
-
-JSONが不完全です（`"hello]`のクォートが閉じられていません）。
-
-**After（修正後）**
-```bash
-curl -X POST http://localhost:2375/containers/create \
-  -H "Content-Type: application/json" \
-  -d '{
-    "Image": "ubuntu:20.04",
-    "Cmd": ["echo", "hello"],
-    "Tty": true
-  }'
-```
-
-JSONの構文を正しく閉じ、必須フィールドを完成させます。
-
-### 原因4：docker push時のタグ形式の誤り
-
-**なぜ発生するか**
-Dockerレジストリ（DockerHubやプライベートレジストリ）にイメージをプッシュする際、タグ形式が不正であるか、認証情報が不足している場合、レジストリが400エラーを返します。
-
-**Before（エラーが起きる状態）**
-```bash
-docker tag myapp:latest myregistry.com/myapp
-docker push myregistry.com/myapp
-# Error response from daemon: HTTP/400: Bad Request
-```
-
-タグに版が含まれていません。
-
-**After（修正後）**
-```bash
-docker tag myapp:latest myregistry.com/myapp:latest
-docker push myregistry.com/myapp:latest
-```
-
-レジストリURL、リポジトリ名、タグを完全な形式で指定します。
-
-## Docker固有の注意点
-
-### docker-composeネットワーク設定でのエラー
-
-docker-composeで複数のサービス間の通信設定が不正な場合、400エラーが発生することがあります。特に`networks`セクションで指定するネットワーク名やドライバーが不正であると、コンテナ起動時にデーモンがリクエストを拒否します。
-
-```yaml
-version: '3.8'
-services:
-  app:
-    image: myapp:latest
-    networks:
-      - backend
-networks:
-  backend:
-    driver: bridge
-```
-
-### Dockerソケット接続時の権限問題
-
-Dockerデーモンへの接続に使用される`/var/run/docker.sock`へのアクセス権がない場合、結果として400エラーとして報告されることがあります。ユーザーが`docker`グループに属していることを確認してください。
+まず両者のバージョンを確認します。
 
 ```bash
-sudo usermod -aG docker $USER
-newgrp docker
+docker version
+# Client: の API version と Server: の API version を比較する
+
+# 環境変数でバージョンを固定していないかを確認
+env | grep -i docker_api
 ```
 
-### レジストリ認証情報の不完全性
+不一致が起きる典型は3つです。第一に、古いデーモンが更新されないまま、クライアント側（CLI や、Docker API を使うツール・ライブラリ）だけが更新されるケースです。NAS などの組み込み環境や、長期稼働の古いサーバーで起きやすい形です。第二に、CI の Docker-in-Docker 構成です。dind イメージやジョブ内の CLI に :latest のような浮動タグを使っていると、どちらか一方だけが新しくなった時点で組み合わせが壊れます。第三に、DOCKER_API_VERSION 環境変数に古い値が残っているケースで、この場合クライアントは常にその古いバージョンを名乗るため、デーモン側の下限引き上げで突然 too old になります。
 
-DockerHubやプライベートレジストリに認証なしでプッシュしようとした場合、サーバーが400エラーを返すことがあります。事前に`docker login`を実行してください。
+対処の本筋は、デーモン（サーバー側）を更新して対応範囲を揃えることです。すぐに更新できない場合の応急策として、DOCKER_API_VERSION をサーバーが対応する値（docker version の Server: の API version）に固定すれば、クライアントがそのバージョンとして振る舞い、通信は成立します。ただしクライアントの新機能はそのバージョンの範囲に制限されます。CI では、dind イメージと CLI のバージョンを浮動タグではなく明示的に固定し、更新を意図的に行う運用が恒久対処です。
+
+### 原因2：API を直接呼び出すリクエストの形式が不正
+
+デーモンの API を curl やプログラムから直接呼ぶ場合、本文が JSON として読めない、または Content-Type が不正だと、デーモンの入口の検証で拒否され400になります。
+
+**Before（JSON が壊れていて400になる）：**
 
 ```bash
-docker login
-# ユーザー名とパスワードを入力
-docker push myregistry.com/myapp:latest
+curl -s -o /dev/null -w "%{http_code}\n" --unix-socket /var/run/docker.sock \
+  -X POST -H "Content-Type: application/json" \
+  -d '{"Image": "nginx" "Cmd": ["echo"]}' \
+  http://localhost/containers/create
+# → 400（カンマの欠落）
 ```
 
-## それでも解決しない場合
-
-### デバッグログの確認
-
-Dockerデーモンの詳細ログを確認することで、エラーの正確な原因が判明することがあります。
+**After（修正後）：**
 
 ```bash
-dockerd --debug 2>&1 | grep -i "400\|bad request"
+curl -s --unix-socket /var/run/docker.sock \
+  -X POST -H "Content-Type: application/json" \
+  -d '{"Image": "nginx", "Cmd": ["echo"]}' \
+  http://localhost/containers/create
 ```
 
-または、Dockerコマンドに`-D`フラグを追加して詳細情報を表示します。
+送信前に本文を JSON 検証にかける（python3 -m json.tool など）のが確実です。プログラムからの呼び出しなら、直列化をライブラリに任せているかを確認します（この落とし穴の詳細は [GitHub API の 400 の記事](https://errorlog.jp/posts/github_api_400/)で扱った内容と同型です）。
+
+### 原因3：設定値がデーモンの検証で弾かれている
+
+コンテナ作成時の設定（再起動ポリシー、資源制限などの各項目）は、デーモン側で値の検証が行われ、不正な値は不正なパラメータとして400で拒否されます。この場合のエラー文言には、どの項目のどの値が不正かが具体的に書かれます。対処は文言が名指しする項目の修正で、指定できる値の一覧は該当機能の公式リファレンスで確認します。「400だから形式の問題だろう」と JSON の体裁ばかり見るのではなく、文言が指す個別の値を読むのが近道です。
+
+## 補足：400ではない類似エラー
+
+400と混同されやすいエラーの正しい行き先です。dockerfile parse error や Dockerfile の命令の誤りは、ビルドの解析段階のエラーであり、HTTP の400ではありません（調査対象は Dockerfile の該当行です）。compose ファイルの YAML 不正は、compose がファイルを読む段階のクライアント側エラーで、デーモンには届いていません。invalid reference format（repository name must be lowercase を含む）はイメージ名の規則違反で、送信前に拒否されます（名前の規則は [docker_404 の記事](https://errorlog.jp/posts/docker_404/)の補足を参照）。Cannot connect to the Docker daemon はデーモン不達で、400どころか HTTP のやり取り自体が成立していません（[docker_500 の記事](https://errorlog.jp/posts/docker_500/)の補足を参照）。
+
+## 切り分けの順序
+
+1. エラー文言を読む。too new / too old なら原因1、invalid 系なら原因2・3、それ以外（parse error、YAML、reference format、Cannot connect）は400以外の調査に切り替える。
+2. 原因1なら docker version で両者の API バージョンを確認し、DOCKER_API_VERSION の残存を洗い出す。本筋はデーモン更新、応急はバージョン固定、CI はイメージの明示固定。
+3. 原因2なら送信本文を JSON 検証にかけ、直列化の経路を確認する。
+4. 原因3なら文言が名指しする設定項目を公式リファレンスと突き合わせて修正する。
+
+## 確認コマンド集
 
 ```bash
-docker -D build -t myimage:latest .
+# 1. クライアントとデーモンの API バージョンを確認
+docker version
+
+# 2. バージョン固定の環境変数が残っていないかを確認
+env | grep -i docker
+
+# 3. デーモンが対応する API バージョンを直接確認
+curl -s --unix-socket /var/run/docker.sock http://localhost/version
+
+# 4. API に送る本文の JSON 検証
+python3 -m json.tool < body.json
 ```
 
-### Dockerfileのバリデーション
+## Editor's Note
 
-Dockerfileの構文を事前にチェックするには、Hadolintなどのツールを使用してください。
+原因1の実例として、GitLab の公式サポート文書があります（[Docker API Version Mismatch Errors in CI/CD Pipelines](https://support.gitlab.com/hc/en-us/articles/23582251372060)）。CI の Docker-in-Docker 構成で、too new と too old の両方のエラーが発生する事象について、原因と対処がまとめられています。背景は、Docker 29 が受け付ける最小 API バージョンを引き上げたことです。dind サービスのイメージに :latest や :dind のような浮動タグを使っていると、サービス側だけが自動的に29系へ更新され、ジョブ内の古いクライアントとの組み合わせが壊れます。対処として、ランナーが使う Docker Engine のバージョンを明示的に固定する設定が示されています。「何も変えていないのに昨日から急に400」という症状の裏に、浮動タグ経由の片側だけの自動更新がある、という CI の定番の構図をそのまま示す記録です。同種の報告は、古いデーモンを更新できない NAS 環境（更新されたツールが too new で接続不能になった例）など、CI 以外でも確認できます。
 
-```bash
-hadolint Dockerfile
-```
-
-### 公式ドキュメントの確認
-
-- [Docker Build reference](https://docs.docker.com/reference/dockerfile/) - Dockerfileの正確な構文
-- [Docker Compose specification](https://docs.docker.com/compose/compose-file/) - docker-compose.ymlの仕様
-- [Docker Engine API](https://docs.docker.com/engine/api/) - RemoteAPIの詳細
-
-### コミュニティリソース
-
-DockerのGitHub Issuesやstack Overflowで同様のエラーが報告されていないか検索してください。特に`docker-compose`や特定のバージョンでの互換性問題はGitHubのIssuesで詳細が共有されていることが多いです。
+Docker の400は、文言がバージョンの数字や不正な項目を名指ししてくれる親切なエラーです。リクエストの体裁を疑う前に、まず文言を読み、クライアントとデーモンの組み合わせを確認することが確実な近道です。
 
 ---
 
