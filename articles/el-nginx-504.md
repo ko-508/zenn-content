@@ -11,296 +11,121 @@ published: true
 元記事: https://errorlog.jp/posts/nginx_504/
 :::
 
+## 冒頭まとめ
+
+Nginx の 504 Gateway Time-out は、リバースプロキシとして上流（proxy_pass や fastcgi_pass の先）の応答を待ったが、時間内に届かなかったことを示します。時間切れになるタイマーは2つあり、どちらかはエラーログの文言で判別できます。文言が while connecting to upstream で終わっていれば、接続の確立自体が時間切れです（proxy_connect_timeout。原因は経路の問題が典型）。while reading response header from upstream で終わっていれば、接続はできたが応答が返らない時間切れです（proxy_read_timeout。原因は上流の処理の遅さが典型）。
+
+対処の本筋は、時間を延ばすことではなく、どのタイマーがなぜ切れたかを特定することです。応答待ちの時間切れなら遅い処理の改善が本筋で、正当に時間のかかる処理に限ってタイムアウトを延ばします。その際、設定したのに効かないという定番の落とし穴（別の location が処理している、リロード漏れ）があるため、実効設定の確認までを対処に含めます。
+
 ## エラーの概要
 
-504 Gateway Timeoutは、Nginxがリバースプロキシとしてバックエンドサーバー（アプリケーションサーバーやAPIサーバー）からのレスポンスを一定時間待ちきれず、タイムアウトした状況を示すエラーです。Nginxそのものは正常に動作していますが、バックエンド側の処理時間が長すぎるか、サーバーが応答していない、あるいはネットワーク経路に問題がある可能性があります。
+Nginx が自身の既定ページで504を返す場合、ブラウザには「504 Gateway Time-out」（Time-out はハイフン入り）という見出しだけが表示されます。エラーログには次のように記録されます。
 
-## 実際のエラーメッセージ例
-
-ブラウザに表示される場合：
-```
-504 Gateway Timeout
-```
-
-Nginxのエラーログ（`/var/log/nginx/error.log`）に記録される例：
-```
-2024/01/15 14:32:10 [error] 1234#1234: *567 upstream timed out (110: Connection timed out) while connecting to upstream, client: 192.168.1.100, server: example.com, request: "GET /api/process HTTP/1.1"
+```text
+2026/07/14 14:32:10 [error] 1234#1234: *567 upstream timed out (110: Connection timed out)
+while reading response header from upstream, client: 192.168.1.100, server: example.com,
+request: "GET /api/report HTTP/1.1", upstream: "http://127.0.0.1:8080/api/report"
 ```
 
-Nginxアクセスログ（`/var/log/nginx/access.log`）の例：
+関係するタイマーの正確な仕様を押さえておくと、対処を誤りません。公式ドキュメントによると、proxy_connect_timeout（既定60秒）は上流との接続確立に対する制限で、通常75秒を超える値には設定できません。proxy_read_timeout（既定60秒）は応答の読み取りに対する制限ですが、応答全体の転送時間の上限ではなく、連続する2つの読み取り操作の間隔に適用されます。つまり上流が少しずつでもデータを送り続けていれば、全体が60秒を超えても切れません。切れるのは「この時間、何も送られてこなかった」ときです。proxy_send_timeout（既定60秒）は同様に、上流への書き込み操作の間隔に適用されます。PHP-FPM などの FastCGI 構成では、対応する fastcgi_read_timeout などが同じ意味を持ちます。
+
+なお、似た状況で別のコードになる場合があります。上流への接続が即座に拒否された場合（プロセス停止・ポート違い）は504ではなく502です。また、Nginx が待っている間にクライアント側が先に諦めて切断した場合は、誰にも何も返らず、アクセスログに499が記録されます。
+
+## まず最初に：エラーログの文言でタイマーを特定する
+
+```bash
+sudo grep "upstream timed out" /var/log/nginx/error.log | tail -10
 ```
-192.168.1.100 - - [15/Jan/2024:14:32:10 +0900] "GET /api/process HTTP/1.1" 504 182 "-" "Mozilla/5.0"
-```
+
+該当行の末尾近くの文言を読みます。while connecting to upstream なら接続確立の時間切れで、調べるのは経路です（原因2）。while reading response header from upstream なら応答待ちの時間切れで、調べるのは上流の処理時間です（原因1）。
+
+処理時間の実測には、アクセスログに $request_time と $upstream_response_time を加えるのが確実です（設定例は [499 の記事](https://errorlog.jp/posts/nginx_499/)の「処理時間をログに出す」を参照してください。504 の調査でもそのまま使えます）。504 の行の時間が proxy_read_timeout の値にほぼ一致していれば、そのタイマーで切れたことの裏付けになります。
 
 ## よくある原因と解決手順
 
-### 原因1：proxy_connect_timeoutまたはproxy_read_timeoutが短すぎる
+### 原因1：上流の応答が遅い（応答待ちの時間切れ）
 
-バックエンドサーバーの処理に時間がかかるのに対し、Nginxのタイムアウト設定が短すぎる場合、504エラーが発生します。デフォルトでは60秒に設定されていることが多く、これを超える処理では必ず404が発生します。
+最も多い原因です。重いデータベース処理、大きなファイルの生成、外部サービスの呼び出し待ちなどで、上流が proxy_read_timeout の間、何も送信できない状態になっています。
 
-**Before（エラーが起きるコード）：**
+対処は2段階です。第一に、遅い処理の特定と改善です。$upstream_response_time 付きのログで、どの URL の処理が上限に張り付いているかを特定し、上流アプリケーション側で改善します。恒常的に全体が遅いなら、上流の資源（CPU・メモリ・ワーカー数）の見直しも対象です。
+
+第二に、レポート生成のように正当に時間のかかる処理に限って、タイムアウトを実態に合わせます。全体に長い値を設定すると、本当に異常なとき（上流の応答不能）にクライアントを長時間待たせることになるため、該当の location に限定するのが安全です。
+
+**Before（既定の60秒で切れる）：**
+
 ```nginx
-upstream backend {
-    server 192.168.1.10:8080;
-}
-
-server {
-    listen 80;
-    server_name example.com;
-
-    location /api/ {
-        proxy_pass http://backend;
-    }
+location /api/report {
+    proxy_pass http://127.0.0.1:8080;
 }
 ```
 
-**After（修正後）：**
+**After（時間のかかる処理に限って延長）：**
+
 ```nginx
-upstream backend {
-    server 192.168.1.10:8080;
-}
-
-server {
-    listen 80;
-    server_name example.com;
-
-    location /api/ {
-        proxy_pass http://backend;
-        proxy_connect_timeout 10s;
-        proxy_send_timeout 30s;
-        proxy_read_timeout 120s;
-    }
+location /api/report {
+    proxy_pass http://127.0.0.1:8080;
+    proxy_read_timeout 300s;
 }
 ```
 
-`proxy_connect_timeout` はバックエンドとの接続確立待ち時間、`proxy_read_timeout` はレスポンス受信待ち時間です。処理内容に応じて秒数を調整してください。
+PHP-FPM 構成なら、対応する指定は fastcgi_read_timeout です。あわせて、アプリケーション側にも実行時間の制限（PHP の実行時間制限など）がある場合、そちらが先に発動すると症状は504ではなく別のエラー（応答が壊れて502など）に変わります。経路上の制限は Nginx だけでない点に注意してください。
 
-### 原因2：バックエンドサーバーがダウンしているか応答していない
-
-バックエンドサーバー自体がクラッシュしているか、ネットワークで到達不可能な状態では、Nginxはタイムアウトするまで待機し、504を返します。
-
-**Before（エラーが起きるコード）：**
-```nginx
-upstream backend {
-    server 192.168.1.10:8080;
-    server 192.168.1.11:8080;
-}
-
-server {
-    listen 80;
-    server_name example.com;
-
-    location / {
-        proxy_pass http://backend;
-    }
-}
-```
-
-**After（修正後）：**
-```nginx
-upstream backend {
-    server 192.168.1.10:8080 max_fails=3 fail_timeout=30s;
-    server 192.168.1.11:8080 max_fails=3 fail_timeout=30s;
-}
-
-server {
-    listen 80;
-    server_name example.com;
-
-    location / {
-        proxy_pass http://backend;
-        access_log /var/log/nginx/access.log;
-        error_log /var/log/nginx/error.log debug;
-    }
-}
-```
-
-`max_fails` と `fail_timeout` を設定することで、失敗したサーバーを一時的に除外できます。まずはバックエンドサーバーのステータスを確認してください。
+設定後は反映と実効確認までを1セットにします。
 
 ```bash
-curl -v http://192.168.1.10:8080/health
+sudo nginx -t && sudo systemctl reload nginx
+sudo nginx -T | grep -nE "read_timeout|connect_timeout|send_timeout"
 ```
 
-レスポンスがない場合、バックエンドサーバーのプロセスが停止していないか確認します。
+「設定したのに60秒で切れ続ける」場合、その60秒という値自体が、書いた設定がそのリクエストに効いていないこと（既定値で動いていること）を示しています。対象リクエストを実際に処理している location はどれか（[404 の記事](https://errorlog.jp/posts/nginx_404/)の location 優先順位を参照）、リロードは成功したかを確認してください。
 
-### 原因3：バックエンド処理が実際に遅い（アプリケーション側の問題）
+### 原因2：接続の確立が時間切れになる（経路の問題）
 
-データベースクエリが遅い、外部APIの呼び出しが遅い、或いはリソース不足によりバックエンドサーバーの処理時間が著しく長くなっている場合、504が発生します。
+while connecting to upstream の504は、上流に接続の要求を送ったのに応答（受諾も拒否も）が返らないまま proxy_connect_timeout が過ぎた状態です。典型は、ファイアウォールが通信を黙って破棄している、経路がなく到達できない、上流ホストが電源断などで無応答、というケースです。上流のプロセスが停止しているだけなら接続は即座に拒否されて502になるため、「504で、しかも connecting」という組み合わせは、拒否すら返ってこない経路の問題を指しています。
 
-**Before（エラーが起きるコード）：**
-```nginx
-upstream backend {
-    server 192.168.1.10:8080;
-}
-
-server {
-    listen 80;
-    server_name example.com;
-
-    location /api/report {
-        proxy_pass http://backend;
-        # タイムアウト設定なし
-    }
-}
-```
-
-**After（修正後）：**
-```nginx
-upstream backend {
-    server 192.168.1.10:8080;
-}
-
-server {
-    listen 80;
-    server_name example.com;
-
-    location /api/report {
-        proxy_pass http://backend;
-        proxy_read_timeout 300s;
-        proxy_buffering on;
-        proxy_buffer_size 4k;
-        proxy_buffers 8 4k;
-    }
-}
-```
-
-同時に、アプリケーション側でクエリの最適化、キャッシュの導入、非同期処理化などを検討してください。
-
-### 原因4：upstream接続の設定ミス
-
-upstreamのサーバーアドレスが間違っている、ポート番号が誤っている、あるいは名前解決が失敗している場合も504が発生します。
-
-**Before（エラーが起きるコード）：**
-```nginx
-upstream backend {
-    server backend-service:8080;  # DNSで解決できない場合
-}
-
-server {
-    listen 80;
-    server_name example.com;
-
-    location / {
-        proxy_pass http://backend;
-    }
-}
-```
-
-**After（修正後）：**
-```nginx
-upstream backend {
-    server 192.168.1.10:8080;
-    resolver 8.8.8.8 8.8.4.4 valid=300s;
-    resolver_timeout 5s;
-}
-
-server {
-    listen 80;
-    server_name example.com;
-
-    location / {
-        proxy_pass http://backend;
-    }
-}
-```
-
-または具体的なIPアドレスを指定するか、`resolver` ディレクティブで名前解決を明示的に設定してください。
-
-## Nginx固有の注意点
-
-### connection_resetが記録される場合
-
-エラーログに「connection reset by peer」と出力されている場合、バックエンドサーバーが異常に終了しているか、ファイアウォール・ロードバランサーが接続を切断している可能性があります。
-
-```nginx
-location / {
-    proxy_pass http://backend;
-    proxy_next_upstream error timeout http_502 http_503;
-    proxy_next_upstream_tries 2;
-}
-```
-
-`proxy_next_upstream` と `proxy_next_upstream_tries` を使用すると、失敗時に別のupstreamサーバーへ自動的にリトライします。
-
-### keep-aliveとコネクションプーリング
-
-バックエンドサーバーとの通信がkeep-aliveで接続を保持していない場合、接続確立の遅延が蓄積します。
-
-**Before（エラーが起きるコード）：**
-```nginx
-upstream backend {
-    server 192.168.1.10:8080;
-}
-```
-
-**After（修正後）：**
-```nginx
-upstream backend {
-    server 192.168.1.10:8080;
-    keepalive 32;
-}
-
-server {
-    location / {
-        proxy_pass http://backend;
-        proxy_http_version 1.1;
-        proxy_set_header Connection "";
-    }
-}
-```
-
-`keepalive` でコネクションプーリングを有効化し、`proxy_http_version 1.1` と `Connection` ヘッダー削除で接続の再利用を促進します。
-
-### ロードバランサーのヘルスチェック
-
-複数のバックエンドサーバーがある場合、`upstream` 内で `check` モジュール（Nginxの有志開発版）を使用するか、外部のロードバランシングツール（例：HAProxy）と組み合わせることで、より堅牢な構成が実現できます。通常のNginxではアクティブなヘルスチェックが非標準のため、まずエラーログを確認して個別サーバーの状態を把握してください。
-
-## それでも解決しない場合
-
-### ログの詳細確認
-
-Nginxをデバッグモードで再起動し、詳細なログを記録してください。
+切り分けは、Nginx のサーバーから上流へ直接接続を試すことです。
 
 ```bash
-# nginx.confでdebugレベルを設定
-error_log /var/log/nginx/error.log debug;
-
-# Nginxをリロード
-sudo systemctl reload nginx
-
-# エラーログの末尾を監視
-sudo tail -f /var/log/nginx/error.log
+curl -m 5 -i http://<上流のアドレス>:<ポート>/
 ```
 
-エラーメッセージの「upstream timed out」に続く詳細情報（ホスト、ポート、エラー番号）を確認し、どの段階で失敗しているか特定してください。
+即座に拒否されるなら502系の問題（上流のプロセス・ポート）、応答がないまま待たされるなら経路（ファイアウォール、セキュリティグループ、ルーティング）を疑います。proxy_connect_timeout を延ばすのは対処になりません。健全な経路なら接続確立は一瞬で終わるためで、この504で調整すべきは時間ではなく経路です。
 
-### バックエンドサーバーの動作確認
+### 原因3：多段構成でのタイマーの不整合
 
-バックエンドサーバーのプロセス状態とリスニングポートを確認します。
+Nginx の手前に別の中継役（CDN、ロードバランサー、もう1段の Nginx）がいる構成では、どの段のタイマーが最初に切れるかで症状の出方が変わります。手前のタイマーが Nginx の proxy_read_timeout より短ければ、Nginx が待っている間に手前が先に504を返し（このとき Nginx 側にはクライアント切断として499が残ります）、Nginx 側だけ調整しても直りません。原則は、外側ほどタイマーを長くすることです（クライアント > 手前の中継役 > Nginx > 上流アプリの実行制限）。この整合が取れていると、時間切れは常に最も内側で起き、調査の場所が安定します。
+
+## 切り分けの順序
+
+1. エラーログの upstream timed out の行を読み、connecting（原因2）か reading response header（原因1）かを確定する。行がないのに504が返る場合は、504を返したのが手前の中継役でないか（原因3）、上流自身が504を応答していないかを確認する。
+2. reading 側なら、$upstream_response_time 付きのログで遅い処理を特定し、上流側で改善する。正当な長時間処理は該当 location に限って read 系タイムアウトを延ばし、nginx -T で実効値を確認する。
+3. connecting 側なら、上流への直接接続で経路を確認する。即拒否なら502の問題として切り替える。
+4. 多段構成なら、各段のタイマーが外側ほど長い並びになっているかを確認する。
+
+## 確認コマンド集
 
 ```bash
-# バックエンドサーバー上で実行
-netstat -tlnp | grep 8080
-ps aux | grep application
+# 1. タイムアウトの発生状況と文言（connecting か reading か）を確認
+sudo grep "upstream timed out" /var/log/nginx/error.log | tail -10
+
+# 2. アクセスログの 504 の傾向を確認
+sudo grep " 504 " /var/log/nginx/access.log | tail -20
+
+# 3. タイムアウト関連の実効設定を確認（include 含む全体から）
+sudo nginx -T | grep -nE "read_timeout|connect_timeout|send_timeout"
+
+# 4. 上流への直接接続で、遅いのか・無応答なのか・即拒否なのかを確認
+curl -m 5 -o /dev/null -s -w "HTTP:%{http_code} 合計:%{time_total}s\n" http://<上流のアドレス>:<ポート>/
+
+# 5. 設定の文法確認とリロード
+sudo nginx -t && sudo systemctl reload nginx
 ```
 
-プロセスが起動していない、ポートにバインドしていない場合は、アプリケーション自体の起動を確認してください。
+## Editor's Note
 
-### ネットワーク疎通確認
+「設定したのに効かない」の実例として、海外の技術 Q&A サイトの報告があります（[qna.habr.com の質問](https://qna.habr.com/q/156375)、2014年）。約3分かかるスクリプトのために fastcgi_read_timeout 600 を設定したのに、ブラウザにはちょうど1分で 504 Gateway Time-out が表示され、エラーログには upstream timed out (110: Connection timed out) while reading response header from upstream が記録されている、という内容です。注目すべきは時間です。切れているのは設定した600秒ではなく、既定値と同じ60秒です。つまりこの記録は、書いた設定がそのリクエストの処理に使われていない（別の location が処理しているか、設定が読み込まれていない）ことを、ログの数字そのものが示している実例です。古い報告ですが、fastcgi_read_timeout と proxy_read_timeout のこの挙動は現行の公式ドキュメントの仕様と変わりません。504 の調査で値を延ばす前に実効設定を確認すべき理由が、ここに凝縮されています。
 
-NginxサーバーからバックエンドサーバーへのTCP接続確認：
-
-```bash
-# Nginxサーバー上で実行
-nc -zv 192.168.1.10 8080
-curl -v --connect-timeout 5 http://192.168.1.10:8080/health
-```
-
-接続できない場合は、ファイアウォール設定（`iptables`, `ufw`）を確認し、必要に応じてルールを追加してください。
-
-### 公式ドキュメント
-
-Nginxの公式ドキュメント「Reverse Proxy」（https://nginx.org/en/docs/http/ngx_http_proxy_module.html）で `proxy_*_timeout` パラメータの詳細仕様を確認できます。また、「HTTP Upstream Module」では upstream設定のベストプラクティスが記載されています。
+504 は「どのタイマーが切れたか」をログが名指ししてくれるエラーです。文言と実測時間を読み、経路・処理・設定の三択のどれかを確定してから手を打つことが確実な近道です。
 
 ---
 
