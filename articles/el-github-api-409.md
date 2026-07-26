@@ -157,7 +157,7 @@ curl -s -X PUT -H "Authorization: Bearer <your-github-token>" \
 
 ## 補足：409ではない類似エラー
 
-409と思われがちな検証エラーの正しい行き先です。ブランチやタグの作成で同名の参照が既に存在する場合の Reference already exists、差分のないプルリクエスト作成の No commits between、既存タグと重複するリリース作成は、いずれも errors 配列を伴う 422 Validation Failed で、409ではありません（422 の読み方は [GitHub API の 400 の記事](https://errorlog.jp/posts/github_api_400/)を参照）。競合などでマージできない状態のプルリクエストへのマージ要求は、409ではなく 405 と定義されており、マージ可否は事前に pull request の mergeable 属性で確認できます（公式ガイドは mergeable が計算されるまでポーリングする方法を案内しています）。権限不足や不存在は、private リポジトリの秘匿のため 404 です（[404 の記事](https://errorlog.jp/posts/github_api_404/)）。並行リクエストの多さそのものが弾かれる場合は secondary rate limit で、403 または 429 です（[403 の記事](https://errorlog.jp/posts/github_api_403/)、[429 の記事](https://errorlog.jp/posts/github_api_429/)）。
+409と思われがちな検証エラーの正しい行き先です。ブランチやタグの作成で同名の参照が既に存在する場合の Reference already exists、差分のないプルリクエスト作成の No commits between、既存タグと重複するリリース作成は、いずれも errors 配列を伴う 422 Validation Failed で、409ではありません（422 の読み方は [GitHub API の 400 の記事](https://errorlog.jp/posts/github_api_400/)を参照）。競合などでマージできない状態のプルリクエストへのマージ要求は、409ではなく 405 と定義されており（[405 の記事](https://errorlog.jp/posts/github_api_405/)）、マージ可否は事前に pull request の mergeable 属性で確認できます（公式ガイドは mergeable が計算されるまでポーリングする方法を案内しています）。権限不足や不存在は、private リポジトリの秘匿のため 404 です（[404 の記事](https://errorlog.jp/posts/github_api_404/)）。並行リクエストの多さそのものが弾かれる場合は secondary rate limit で、403 または 429 です（[403 の記事](https://errorlog.jp/posts/github_api_403/)、[429 の記事](https://errorlog.jp/posts/github_api_429/)）。
 
 ## 切り分けの順序
 

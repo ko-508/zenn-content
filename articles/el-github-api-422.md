@@ -135,7 +135,7 @@ code が custom の場合、公式文書のとおり必ず message が付きま�
 
 ## 補足：422ではない類似エラー
 
-本文が JSON として読めない場合は 400 で、message は Problems parsing JSON や Body should be a JSON object になります。422の調査の手前で、直列化の回数を疑う段階です（[GitHub API の 400 の記事](https://errorlog.jp/posts/github_api_400/)）。リクエストの中身ではなく「対象の今の状態」との矛盾は 409 です。sha を伴う更新の追い越し、空リポジトリへの Git 系 API がこれにあたります（[GitHub API の 409 の記事](https://errorlog.jp/posts/github_api_409/)）。マージできない状態のプルリクエストへのマージ要求は 405 です。リポジトリや対象そのものの不存在・権限不足は、private の秘匿のため 404 です（[GitHub API の 404 の記事](https://errorlog.jp/posts/github_api_404/)）。リクエストの量や頻度が弾かれる場合、通常は 403 または 429 の secondary rate limit として現れます（[403 の記事](https://errorlog.jp/posts/github_api_403/)、[429 の記事](https://errorlog.jp/posts/github_api_429/)）。ただし前述のとおり、公式リファレンスの422の要約にはスパム判定の場合が含まれており、連続作成系の操作では「量の問題が422の形で現れる」ことがある点も覚えておくと迷いません。
+本文が JSON として読めない場合は 400 で、message は Problems parsing JSON や Body should be a JSON object になります。422の調査の手前で、直列化の回数を疑う段階です（[GitHub API の 400 の記事](https://errorlog.jp/posts/github_api_400/)）。リクエストの中身ではなく「対象の今の状態」との矛盾は 409 です。sha を伴う更新の追い越し、空リポジトリへの Git 系 API がこれにあたります（[GitHub API の 409 の記事](https://errorlog.jp/posts/github_api_409/)）。マージできない状態のプルリクエストへのマージ要求は 405 です（[405 の記事](https://errorlog.jp/posts/github_api_405/)）。リポジトリや対象そのものの不存在・権限不足は、private の秘匿のため 404 です（[GitHub API の 404 の記事](https://errorlog.jp/posts/github_api_404/)）。リクエストの量や頻度が弾かれる場合、通常は 403 または 429 の secondary rate limit として現れます（[403 の記事](https://errorlog.jp/posts/github_api_403/)、[429 の記事](https://errorlog.jp/posts/github_api_429/)）。ただし前述のとおり、公式リファレンスの422の要約にはスパム判定の場合が含まれており、連続作成系の操作では「量の問題が422の形で現れる」ことがある点も覚えておくと迷いません。
 
 ## 切り分けの順序
 
