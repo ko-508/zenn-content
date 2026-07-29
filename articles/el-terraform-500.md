@@ -118,7 +118,7 @@ steps:
 
 ## 補足：500ではない類似エラー
 
-500の原因として語られがちですが、仕様上は別の形で現れる問題があります。実行アカウントの権限不足は、AWS なら AccessDenied や UnauthorizedOperation を含む 403 系のエラーとして返り、調査の場所は IAM です。API のスロットリングは ThrottlingException（HTTP では 400 のこともあります）や 429 で、プロバイダーの自動再試行の対象です。再試行を使い切るほどの規模なら、並列度（terraform apply の -parallelism）や対象の分割を検討します（AWS 側のスロットリングの仕組みは [AWS の 429 の記事](https://errorlog.jp/posts/aws_429/)を参照）。Terraform で構築した ALB や API Gateway が返す 503・504 は、Terraform ではなく構築したインフラ自体の問題です（[AWS の 503 の記事](https://errorlog.jp/posts/aws_503/)、[AWS の 504 の記事](https://errorlog.jp/posts/aws_504/)）。TERRAFORM CRASH という見出しとスタックトレース、crash.log の生成を伴う異常終了は、HTTP の500ではなく Terraform 本体のバグで、crash.log を添えて公式リポジトリに報告する対象です。state のロック取得失敗（Error acquiring the state lock）も別系統で、他の実行との競合か、前回の実行の異常終了によるロック残りの調査に切り替えます。
+500の原因として語られがちですが、仕様上は別の形で現れる問題があります。実行アカウントの権限不足は、AWS なら AccessDenied や UnauthorizedOperation を含む 403 系のエラーとして返り、調査の場所は IAM です。API のスロットリングは ThrottlingException（HTTP では 400 のこともあります）や 429 で、プロバイダーの自動再試行の対象です。再試行を使い切るほどの規模なら、並列度（terraform apply の -parallelism）や対象の分割を検討します（AWS 側のスロットリングの仕組みは [AWS の 429 の記事](https://errorlog.jp/posts/aws_429/)を参照）。Terraform で構築した ALB や API Gateway が返す 503・504 は、Terraform ではなく構築したインフラ自体の問題です（[AWS の 503 の記事](https://errorlog.jp/posts/aws_503/)、[AWS の 504 の記事](https://errorlog.jp/posts/aws_504/)）。TERRAFORM CRASH という見出しとスタックトレースを伴う異常終了は、HTTP の500ではなく Terraform 本体のバグで、出力に現れるスタックトレースを添えて公式リポジトリに報告する対象です（[Terraform の crash の記事](https://errorlog.jp/posts/terraform_crash/)）。state のロック取得失敗（Error acquiring the state lock）も別系統で、他の実行との競合か、前回の実行の異常終了によるロック残りの調査に切り替えます（[Terraform の state lock の記事](https://errorlog.jp/posts/terraform_state_lock/)）。
 
 ## 切り分けの順序
 

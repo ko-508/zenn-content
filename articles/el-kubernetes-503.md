@@ -43,7 +43,7 @@ No servers are available to handle this request.
 
 ### 原因1: Podがすべてダウン状態である
 
-DeploymentやStatefulSetで定義したPodが何らかの理由でクラッシュしており、バックエンドサーバーが完全に停止している状態です。CrashLoopBackOff状態やExit Code 1などの異常終了が続いている場合に発生します。
+DeploymentやStatefulSetで定義したPodが何らかの理由でクラッシュしており、バックエンドサーバーが完全に停止している状態です。CrashLoopBackOff状態やExit Code 1などの異常終了が続いている場合に発生します（[Kubernetes の CrashLoopBackOff の記事](https://errorlog.jp/posts/kubernetes_crashloopbackoff/)）。
 
 **Before（エラーが起きるコード）：**
 

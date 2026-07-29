@@ -88,7 +88,7 @@ docker pull myteam/internal-tool
 
 第三に、綴りです。上記2つに該当しなければ、リポジトリ名そのものの誤りを疑い、レジストリのウェブ画面で実在を確認します。
 
-なお、名前に大文字が含まれている場合は、この404系のエラーにはなりません。リポジトリ名は小文字と定められており、レジストリへ問い合わせる前に invalid reference format: repository name must be lowercase として拒否されます。この文言が出たら、404の調査ではなく名前の修正です。
+なお、名前に大文字が含まれている場合は、この404系のエラーにはなりません。リポジトリ名は小文字と定められており、レジストリへ問い合わせる前に invalid reference format: repository name must be lowercase として拒否されます（[Docker の invalid reference format の記事](https://errorlog.jp/posts/docker_invalid_reference_format/)）。この文言が出たら、404の調査ではなく名前の修正です。
 
 ## 補足：404に見えて別の問題
 

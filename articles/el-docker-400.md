@@ -86,7 +86,7 @@ curl -s --unix-socket /var/run/docker.sock \
 
 ## 補足：400ではない類似エラー
 
-400と混同されやすいエラーの正しい行き先です。dockerfile parse error や Dockerfile の命令の誤りは、ビルドの解析段階のエラーであり、HTTP の400ではありません（調査対象は Dockerfile の該当行です）。compose ファイルの YAML 不正は、compose がファイルを読む段階のクライアント側エラーで、デーモンには届いていません。invalid reference format（repository name must be lowercase を含む）はイメージ名の規則違反で、送信前に拒否されます（名前の規則は [docker_404 の記事](https://errorlog.jp/posts/docker_404/)の補足を参照）。Cannot connect to the Docker daemon はデーモン不達で、400どころか HTTP のやり取り自体が成立していません（[docker_500 の記事](https://errorlog.jp/posts/docker_500/)の補足を参照）。
+400と混同されやすいエラーの正しい行き先です。dockerfile parse error や Dockerfile の命令の誤りは、ビルドの解析段階のエラーであり、HTTP の400ではありません（調査対象は Dockerfile の該当行です）。compose ファイルの YAML 不正は、compose がファイルを読む段階のクライアント側エラーで、デーモンには届いていません。invalid reference format（repository name must be lowercase を含む）はイメージ名の規則違反で、送信前に拒否されます（名前の規則は [Docker の invalid reference format の記事](https://errorlog.jp/posts/docker_invalid_reference_format/)を参照）。Cannot connect to the Docker daemon はデーモン不達で、400どころか HTTP のやり取り自体が成立していません（[docker_500 の記事](https://errorlog.jp/posts/docker_500/)の補足を参照）。
 
 ## 切り分けの順序
 

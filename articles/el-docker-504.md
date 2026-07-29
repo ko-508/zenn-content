@@ -114,7 +114,7 @@ Docker 固有の落とし穴として1つだけ区別しておくと、Compose �
 
 ## 補足：このコードではない類似エラー
 
-Cannot connect to the Docker daemon は、デーモンに到達できていない状態で、HTTP のやり取り自体が成立していません（[docker_500 の記事](https://errorlog.jp/posts/docker_500/)の補足を参照）。context deadline exceeded や Client.Timeout exceeded、net/http: TLS handshake timeout を含むエラーは、手元のクライアント側が時間切れで接続を打ち切ったもので、サーバーから504が返ったのとは別の事象です。Error response from daemon: の直後に具体的な処理の失敗が書かれた500系は、デーモンまたはレジストリの内部エラーです（[docker_500 の記事](https://errorlog.jp/posts/docker_500/)）。Docker Hub の利用回数の制限は toomanyrequests の文言を伴う 429 で、時間切れではありません（[docker_429 の記事](https://errorlog.jp/posts/docker_429/)）。pull access denied は認証・権限系で、対象の存在と権限を区別しない設計のエラーです（[docker_404 の記事](https://errorlog.jp/posts/docker_404/)の補足を参照）。
+Cannot connect to the Docker daemon は、デーモンに到達できていない状態で、HTTP のやり取り自体が成立していません（[docker_500 の記事](https://errorlog.jp/posts/docker_500/)の補足を参照）。context deadline exceeded や Client.Timeout exceeded、net/http: TLS handshake timeout を含むエラーは、手元のクライアント側が時間切れで接続を打ち切ったもので、サーバーから504が返ったのとは別の事象です（[Docker の context deadline exceeded の記事](https://errorlog.jp/posts/docker_context_deadline_exceeded/)）。Error response from daemon: の直後に具体的な処理の失敗が書かれた500系は、デーモンまたはレジストリの内部エラーです（[docker_500 の記事](https://errorlog.jp/posts/docker_500/)）。Docker Hub の利用回数の制限は toomanyrequests の文言を伴う 429 で、時間切れではありません（[docker_429 の記事](https://errorlog.jp/posts/docker_429/)）。pull access denied は認証・権限系で、対象の存在と権限を区別しない設計のエラーです（[docker_404 の記事](https://errorlog.jp/posts/docker_404/)の補足を参照）。
 
 ## 切り分けの順序
 
