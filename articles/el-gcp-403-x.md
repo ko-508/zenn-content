@@ -11,193 +11,237 @@ published: true
 元記事: https://errorlog.jp/posts/gcp_403/
 :::
 
+## 冒頭まとめ
+
+GCP の 403 Forbidden は、身元は届いているが、その操作が許されていない状態を示します。認証が通っていない 401 とは段階が違います（[GCP の 401 の記事](https://errorlog.jp/posts/gcp_401/)）。
+
+このエラーの扱いやすさは、応答に含まれる情報の多さにあります。公式文書によれば、コマンド行の道具や窓口が返す文言には、必要な権限の名前、操作しようとした対象、認証に使われた身元、エラーごとの識別子、そして原因を調べるための専用の URL が含まれます。つまり、どの権限が足りないかは推測する必要がありません。応答に書かれています。
+
+原因についても、公式文書が4つに整理しています。必要な権限を持っていない場合、拒否の方針が権限の使用を妨げている場合、主体に対する境界の方針が対象を含んでいない場合、そして対象が存在しない場合です。
+
+4つ目が重要です。対象が存在しない場合も、このエラーになります。実際、文言も「対象に対して権限が拒否されました（あるいは対象が存在しない可能性があります）」という形になっており、両方の可能性を含んだ書き方です。したがって、403 を受け取ったからといって、権限の問題とは限りません。名前の綴りを間違えているだけ、ということがあります。
+
+区分の定義にも、このエラーが要求の妥当性や対象の存在を意味しない、と明記されています。
+
 ## エラーの概要
 
-GCP で 403 エラーが発生した場合、あなたの認証（ログイン）は成功していますが、操作しようとしたリソースへのアクセス権限がないことを意味します。GCP はリソースごとに IAM ロールベースアクセス制御を採用しているため、認証されたユーザーであっても必要なロールが割り当てられていなければこのエラーで拒否されます。API レスポンスや gcloud コマンドで頻繁に見られるエラーです。
-
-## 実際のエラーメッセージ例
-
-**REST API レスポンス例：**
+窓口からの応答は、次の形になります。
 
 ```json
 {
   "error": {
     "code": 403,
-    "message": "Permission 'compute.instances.start' denied on resource 'projects/my-project/zones/us-central1-a/instances/my-instance' (or it may not exist).",
-    "errors": [
+    "message": "Permission 'storage.buckets.list' denied on resource (or it may not exist). Remediate access with this Troubleshooter URL or share it with your administrator - https://console.cloud.google.com/iam-admin/troubleshooter;errorId=<識別子> .",
+    "details": [
       {
-        "message": "Permission 'compute.instances.start' denied on resource 'projects/my-project/zones/us-central1-a/instances/my-instance' (or it may not exist).",
+        "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+        "reason": "forbidden",
         "domain": "global",
-        "reason": "forbidden"
+        "metadata": {
+          "error_info_id": "<識別子>",
+          "permission": "storage.buckets.list"
+        }
       }
     ]
   }
 }
 ```
 
-**gcloud コマンドの出力例：**
+読むべきは `metadata` の中の `permission` です。ここに、不足している権限の名前がそのまま入ります。上の例なら、ファイル置き場の一覧を取得する権限です。
 
-```
-ERROR: (gcloud.compute.instances.start) User does not have permission 
-[compute.instances.start] or it may not exist.
+`message` に含まれる URL も見逃せません。これを開くと、なぜ拒否されたかを調べる画面に移動します。自分に調べる権限が無ければ、この URL を管理者に渡せば済みます。
+
+コマンド行の道具からは、同じ内容が別の形で表示されます。
+
+```text
+ERROR: (gcloud.storage.buckets.list) PERMISSION_DENIED:
+<メールアドレス> does not have storage.buckets.list access to the Google Cloud project.
+Permission 'storage.buckets.list' denied on resource (or it may not exist).
+This command is authenticated as <メールアドレス> which is the active account
+specified by the [core/account] property.
 - '@type': type.googleapis.com/google.rpc.ErrorInfo
-  reason: PERMISSION_DENIED
+  domain: storage.googleapis.com
+  metadata:
+    permission: storage.buckets.list
+    error_info_id: <識別子>
+  reason: IAM_PERMISSION_DENIED
 ```
+
+こちらには、認証に使われた身元も明示されます。意図した身元で操作しているかを、その場で確認できます。
+
+## まず最初に：permission と、認証されている身元を読む
+
+第一に、`metadata` の `permission` を読みます。不足している権限の名前がここにあります。役割を当てずっぽうで足す必要はありません。
+
+第二に、認証に使われている身元を確認します。コマンド行の道具なら文言に出ますし、そうでなければ確認できます。意図と違う身元で動いていることが、しばしばあります。
+
+```bash
+gcloud auth list
+gcloud config list account
+```
+
+第三に、対象の名前が正しいかを確認します。前述のとおり、対象が存在しない場合も同じエラーになります。権限の設定を調べ始める前に、綴りとプロジェクトを確かめてください。
+
+第四に、専用の URL を開きます。ここまでで原因が分からなければ、この画面が答えを持っています。
 
 ## よくある原因と解決手順
 
-### 1. IAM ロールに必要なパーミッションが不足している
+### 原因1：必要な権限を持っていない
 
-最も一般的な原因です。GCP では各操作に対して細かなパーミッションが定義され、ロールはこれらパーミッションの集合です。例えば Compute Engine インスタンスを起動するには `compute.instances.start` パーミッション、Cloud Storage バケットに書き込みするには `storage.buckets.create` パーミッションが必要です。ユーザーやサービスアカウントに割り当てられたロールにこれらが含まれていないと 403 エラーが発生します。
+最も多い形です。応答に名前が出ているので、その権限を含む役割を付与します。
 
-**Before（エラーが起きるコード）：**
-
-```yaml
-# サービスアカウントに Viewer ロール（読み取り専用）のみが割り当てられている
-apiVersion: iam.googleapis.com/v1
-kind: ServiceAccount
-metadata:
-  name: my-service-account
-  email: my-service-account@my-project.iam.gserviceaccount.com
-roles:
-  - roles/viewer  # 読み取り専用、書き込みパーミッションなし
-```
-
-**After（修正後）：**
-
-```yaml
-# 必要なロールを追加
-apiVersion: iam.googleapis.com/v1
-kind: ServiceAccount
-metadata:
-  name: my-service-account
-  email: my-service-account@my-project.iam.gserviceaccount.com
-roles:
-  - roles/compute.instanceAdmin.v1  # インスタンス管理権限を追加
-  - roles/storage.objectCreator       # ストレージ書き込み権限を追加
-```
-
-GCP Cloud Console の IAM ページで「ロールを付与」ボタンからロールを追加するか、gcloud コマンドで `gcloud projects add-iam-policy-binding <project-id> --member=<member> --role=<role>` を実行します。
-
-### 2. 組織ポリシーがリソース操作を制限している
-
-企業環境の GCP では、セキュリティやコスト管理のため組織ポリシーでリソース作成を制限されていることがあります。例えば `compute.skipDefaultNetworkCreation` ポリシーが有効だと、デフォルト VPC の使用が禁止され、新規ネットワーク作成時に 403 エラーが返されます。IAM ロールには権限があっても、組織ポリシーレベルで操作が禁止されていると 403 になります。
-
-**Before（エラーが起きるコード）：**
-
-```yaml
-# 組織レベルで、特定リージョンでの Compute Engine 作成を禁止
-apiVersion: cloudresourcemanager.googleapis.com/v1
-kind: OrgPolicy
-metadata:
-  name: compute-region-restriction
-spec:
-  constraint: compute.allowedPolicies
-  listPolicy:
-    deniedValues:
-      - locations/asia-northeast1
-```
-
-**After（修正後）：**
-
-```yaml
-# アジア地域での作成を許可するようにポリシーを更新
-apiVersion: cloudresourcemanager.googleapis.com/v1
-kind: OrgPolicy
-metadata:
-  name: compute-region-restriction
-spec:
-  constraint: compute.allowedPolicies
-  listPolicy:
-    allowedValues:
-      - locations/asia-northeast1
-      - locations/us-central1
-```
-
-ポリシーの確認は Cloud Console の「ポリシーのインテリジェンス」から行うか、`gcloud resource-manager org-policies describe --project=<project-id>` で確認できます。ポリシー変更には組織管理者権限が必要なため、管理者に依頼することになります。
-
-### 3. サービスアカウントキーの有効期限切れまたは誤ったキーを使用している
-
-認証トークンが発行されても、使用しているサービスアカウントキーが無効（期限切れ、削除済み、別プロジェクトの ID など）だと、リクエスト時に 403 で拒否されます。特に長期実行アプリケーションで古いキーを使い続けている場合に発生します。
-
-**Before（エラーが起きるコード）：**
-
-```python
-# 3年前に生成された古いサービスアカウントキーを使用
-from google.oauth2 import service_account
-
-credentials = service_account.Credentials.from_service_account_file(
-    '/path/to/old-key-created-2021.json'
-)
-
-compute_client = compute_v1.InstancesClient(credentials=credentials)
-# → 403 Permission denied エラーが返される
-```
-
-**After（修正後）：**
-
-```python
-# Cloud Console または gcloud で新規キーを生成
-# gcloud iam service-accounts keys create new-key.json \
-#   --iam-account=my-account@my-project.iam.gserviceaccount.com
-
-from google.oauth2 import service_account
-
-credentials = service_account.Credentials.from_service_account_file(
-    '/path/to/new-key.json'
-)
-
-compute_client = compute_v1.InstancesClient(credentials=credentials)
-# → 正常に動作
-```
-
-サービスアカウントキーは 90 日ごとにローテーションするのが推奨慣行です。キーの確認は `gcloud iam service-accounts keys list --iam-account=<service-account-email>` で行えます。
-
-## GCP 固有の注意点
-
-### Compute Engine インスタンス権限の詳細
-
-Compute Engine でインスタンスを起動・停止する場合、単に `compute.instances.start` パーミッションだけでなく、インスタンスが属する VPC ネットワークに対する `compute.networks.get` パーミッション、ファイアウォールルールの `compute.firewalls.get` パーミッションなども暗黙的に必要です。最初は `roles/compute.instanceAdmin.v1` で一括付与し、後に `roles/compute.osLogin` など最小権限に絞るアプローチが実用的です。
-
-### Cloud Storage と均一アクセス制御
-
-Cloud Storage バケットを操作する場合、バケット自体に対する IAM ロール（`storage.buckets.get` など）とオブジェクトに対するロール（`storage.objects.create` など）が分かれています。さらにバケットで「均一アクセス制御」が有効になっていると、従来の ACL は無視され IAM のみが適用されます。404 と 403 が混在することもあるため、`gsutil ls -b <bucket>` で確認後、IAM ポリシーを再度見直すことが重要です。
-
-### サービスアカウント委譲（Domain-wide Delegation）
-
-ユーザーに代わってアクションを行うサービスアカウント（Google Workspace や Cloud Identity を使用する場合）では、Google Cloud Console で「委譲されたスコープ」を設定する必要があります。設定されていないと、正しいロールがあっても 403 が返されます。
-
-## それでも解決しない場合
-
-### ログを確認する
-
-GCP の監査ログ（Cloud Audit Logs）で詳細を確認しましょう。Cloud Console の「ログ」→「Cloud Audit Logs」から、拒否されたリクエストの詳細（どのパーミッションが不足していたか、どのリソースか）が確認できます。以下のクエリで 403 エラーを抽出できます：
-
-```
-resource.type="<リソースタイプ>"
-protoPayload.status.code=403
-```
-
-### gcloud コマンドでのテスト
-
-特定のロールでのパーミッション有無を確認するには、以下コマンドが便利です：
+**Before（役割を推測で足す）：**
 
 ```bash
-gcloud iam test-iam-permissions <resource> \
-  --permissions=compute.instances.start,compute.instances.stop
+gcloud projects add-iam-policy-binding <プロジェクト> \
+  --member=user:<メールアドレス> --role=roles/editor
+# → 過剰な権限を与えることになり、しかも直らない場合がある
 ```
 
-実行結果に表示されたパーミッションのみが、現在のユーザーに付与されているものです。
+**After（不足している権限を含む役割を選ぶ）：**
 
-### 公式リファレンス
+```bash
+# 応答に出ていた権限を含む役割を探す
+gcloud iam roles list --filter="includedPermissions:storage.buckets.list" \
+  --format="table(name, title)"
 
-- [Cloud IAM ロール リファレンス](https://cloud.google.com/iam/docs/understanding-roles)
-- [Cloud IAM パーミッション リファレンス](https://cloud.google.com/iam/docs/permissions-reference)
-- [Cloud Audit Logs](https://cloud.google.com/logging/docs/audit)
+# 見つかった役割を付与する
+gcloud projects add-iam-policy-binding <プロジェクト> \
+  --member=user:<メールアドレス> --role=roles/storage.objectViewer
+```
 
-### コミュニティリソース
+いま自分がどの権限を持っているかは、対象ごとに確認できます。
 
-GCP 公式の Stack Overflow タグ `google-cloud-platform` や、GitHub の [google-cloud-python](https://github.com/googleapis/google-cloud-python) リポジトリの Issues で類似事例が報告されていることがあります。エラーメッセージの詳細を含めて検索すると、同じ問題の解決策が見つかりやすいです。
+```bash
+gcloud projects test-iam-permissions <プロジェクト> \
+  --permissions=storage.buckets.list,storage.objects.get
+```
+
+結果に出た権限だけが、現在与えられているものです。
+
+### 原因2：対象が存在しない
+
+公式文書が挙げている4つ目の原因です。文言自体が「あるいは対象が存在しない可能性があります」と述べているとおり、権限の問題と区別が付かない形で返ります。
+
+これは、対象の存在を秘匿するための設計です。権限の無い者に「存在するが見せない」と答えると、存在自体が漏れてしまいます。
+
+**Before（権限の設定を疑い続ける）：**
+
+```bash
+gcloud storage ls gs://my-bucket-typo/
+# → 403 が返るので IAM を調べ始める
+```
+
+**After（まず名前とプロジェクトを確認する）：**
+
+```bash
+gcloud config get-value project
+gcloud storage buckets list --format="value(name)" | grep my-bucket
+```
+
+一覧に出てこなければ、綴りが違うか、別のプロジェクトにあります。権限の設定を調べるのは、対象の存在を確認したあとです。
+
+### 原因3：拒否の方針や境界の方針に妨げられている
+
+公式文書が挙げている2つ目と3つ目です。役割で権限を与えていても、拒否の方針が上書きしている場合があります。また、主体に対する境界の方針が設定されている場合、その方針が対象を含んでいなければ操作できません。
+
+役割を足しても直らない場合は、この2つを疑います。
+
+```bash
+# 拒否の方針を確認する
+gcloud iam policies list --attachment-point=<対象> --kind=denypolicies
+
+# 適用されている方針を確認する
+gcloud resource-manager org-policies list --project=<プロジェクト>
+```
+
+この形は、自分では解決できないことが多い種類です。専用の URL を管理者に渡すのが、最も早い進め方です。公式文書にも、管理者と共有できる形で URL が示されると書かれています。
+
+### 原因4：呼び出し先の窓口が有効になっていない
+
+サービス自体が使える状態になっていない場合です。この場合、権限は正しくても要求が通りません。文言に、その窓口が使われていない、あるいは有効化されていない旨が入ります。
+
+```bash
+gcloud services list --enabled | grep <サービス>
+gcloud services enable <サービス>.googleapis.com
+```
+
+窓口を有効にする操作自体にも権限が要るため、その段階で再び 403 になることがあります。その場合は、プロジェクトの管理者に依頼します。
+
+### 原因5：量の超過を権限の問題と誤解している
+
+区分の定義には、資源を使い切ったことによる拒否にこの区分を使ってはならず、その場合は量の超過の区分を使うこと、と明記されています。つまり、割り当ての上限に達した場合は 403 ではありません。
+
+ただし、実際の応答では両者が紛らわしい形で現れることがあります。`status` の値を確認してください。`PERMISSION_DENIED` なら権限、`RESOURCE_EXHAUSTED` なら量の問題です（[GCP の 429 の記事](https://errorlog.jp/posts/gcp_429/)）。
+
+## 補足：似ているが別のもの
+
+認証が通っていない場合は 401 です。区分の定義に、呼び出し元を特定できない場合に 403 の区分を使ってはならないと明記されています。したがって 403 が返っている時点で、身元は届いています（[GCP の 401 の記事](https://errorlog.jp/posts/gcp_401/)）。
+
+送った内容そのものに問題がある場合は 400 で、区分が3つに分かれます（[GCP の 400 の記事](https://errorlog.jp/posts/gcp_400/)）。対象が見つからない場合は 404 になることもあります。403 と 404 のどちらが返るかは、対象の存在を秘匿する必要があるかどうかで変わります（[GCP の 404 の記事](https://errorlog.jp/posts/gcp_404/)）。
+
+処理が内部で失敗した場合は 500、一時的に処理できない場合は 503 です（[GCP の 500 の記事](https://errorlog.jp/posts/gcp_500/)、[503 の記事](https://errorlog.jp/posts/gcp_503/)）。
+
+## 切り分けの順序
+
+1. `metadata` の `permission` を読む。不足している権限の名前がここにある。
+2. 認証に使われている身元を確認する。意図した身元か。
+3. 対象の名前とプロジェクトを確認する。存在しない場合も同じエラーになる。
+4. その権限を含む役割を探して付与する。役割を推測で足さない。
+5. 役割を足しても直らないなら、拒否の方針や境界の方針を疑う。
+6. `status` が `RESOURCE_EXHAUSTED` なら、権限ではなく量の問題。
+7. 自分で解決できない場合は、応答に含まれる専用の URL を管理者に渡す。
+
+## 確認コマンド集
+
+```bash
+# 1. 不足している権限と識別子を取り出す
+curl -sS -H "Authorization: Bearer $(gcloud auth print-access-token)" \
+  "https://<サービス>.googleapis.com/v1/<資源>" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)['error']
+print(d['code'], d['status'])
+for x in d.get('details', []):
+    if x['@type'].endswith('ErrorInfo'):
+        m=x.get('metadata', {})
+        print('  permission:', m.get('permission'))
+        print('  error_info_id:', m.get('error_info_id'))
+        print('  reason:', x.get('reason'), '/ domain:', x.get('domain'))
+"
+
+# 2. いまどの身元で操作しているかを確認する
+gcloud auth list
+gcloud config list account project
+
+# 3. 自分が持っている権限を確認する
+gcloud projects test-iam-permissions <プロジェクト> \
+  --permissions=<権限1>,<権限2>
+
+# 4. その権限を含む役割を探す
+gcloud iam roles list --filter="includedPermissions:<権限>" \
+  --format="table(name, title)"
+
+# 5. 対象が実在するかを確認する（存在しない場合も403になる）
+gcloud storage buckets list --format="value(name)" | grep <名前>
+
+# 6. 監査の記録から拒否された要求を抽出する
+gcloud logging read \
+  'protoPayload.status.code=7 AND severity>=ERROR' \
+  --limit=20 \
+  --format="value(protoPayload.authenticationInfo.principalEmail, protoPayload.methodName, protoPayload.status.message)"
+```
+
+## Editor's Note
+
+403 の応答に含まれる識別子と専用の URL は、このエラーの扱いを大きく変えます。
+
+従来、権限の問題を管理者に相談するときは、何をしようとして何が返ってきたかを説明する必要がありました。説明の過程で情報が落ちると、管理者の側でも再現できません。いまは、URL を1つ渡せば、管理者はその画面で、どの主体がどの対象に対してどの権限を求め、どの方針で拒否されたかを確認できます。公式文書にも、自分に管理の権限が無い場合は管理者と共有できる、と書かれています。
+
+もう1つ、公式文書が挙げる4つの原因の並びも示唆的です。権限の不足、拒否の方針、境界の方針、そして対象の不存在。最後の1つだけが、権限とは無関係です。にもかかわらず同じエラーで返るのは、対象の存在を秘匿するためです。
+
+この設計は、調べる側にとっては厄介です。しかし、文言が「あるいは対象が存在しない可能性があります」と併記していることには意味があります。書いてあるとおり、両方を疑うべきだという指示です。権限の設定を30分調べたあとで名前の綴りに気付く、という事態は、この一文を読んでいれば避けられます。
+
+403 は、応答に答えが書かれている珍しいエラーです。`permission` を読む。身元を確認する。名前を確認する。この3つを先に済ませてください。
 
 ---
 
