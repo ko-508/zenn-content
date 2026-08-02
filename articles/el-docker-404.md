@@ -122,7 +122,7 @@ docker pull docker.io/<ユーザー名>/<イメージ名>:<タグ>
 
 ## Editor's Note
 
-原因3の名前空間の欠落を示す実例として、Docker 公式フォーラムの長期スレッドがあります（[Docker push - Error - requested access to the resource is denied](https://forums.docker.com/t/docker-push-error-requested-access-to-the-resource-is-denied/64468)、2018年開始）。docker login は成功しているのに push が denied: requested access to the resource is denied で失敗するという報告で、出力に The push refers to a repository [docker.io/library/プロジェクト名] とあることから、ユーザー名を省いた名前が公式イメージの領域（library/）への操作として解釈されていたことが分かります。回答は、<ユーザー名>/<イメージ名> の形でタグを付け直して push するというもので、その後も2024年に至るまで同種の報告と同じ解決が繰り返し書き込まれています。この記事は pull の404を中心に扱いましたが、名前空間の欠落という原因は push でも pull でも同じ形で現れる、ということを示す実例です。
+原因3の名前空間の欠落を示す実例として、Docker 公式フォーラムの長期スレッドがあります（[Docker push - Error - requested access to the resource is denied](https://forums.docker.com/t/docker-push-error-requested-access-to-the-resource-is-denied/64468)、2018年開始）。docker login は成功しているのに push が denied: requested access to the resource is denied で失敗するという報告で、出力に The push refers to a repository docker.io/library/[プロジェクト名] とあることから、ユーザー名を省いた名前が公式イメージの領域（library/）への操作として解釈されていたことが分かります。回答は、<ユーザー名>/<イメージ名> の形でタグを付け直して push するというもので、その後も2024年に至るまで同種の報告と同じ解決が繰り返し書き込まれています。この記事は pull の404を中心に扱いましたが、名前空間の欠落という原因は push でも pull でも同じ形で現れる、ということを示す実例です。
 
 Docker の404は、文言が「どこで見つからなかったか」を最初に教えてくれます。名前を打ち直す前に、手元・タグ・リポジトリのどの話なのかを文言で確定することが確実な近道です。
 
