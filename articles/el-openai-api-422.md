@@ -3,115 +3,231 @@ title: "OpenAI API の 422 エラー：原因と解決策"
 emoji: "🚫"
 type: "tech"
 topics: ["openai-api", "error"]
-published: false
+published: true
 ---
 
-OpenAI APIで422エラーが発生するのは、リクエストの構文は正しいものの、含まれるデータが処理要件を満たしていないときです。特にFine-tuningでよく出現するエラーです。
+:::message
+本記事は技術エラー解説サイト [errorlog.jp](https://errorlog.jp/) からの転載です。最新の内容と関連エラーの一覧は元記事を参照してください。
+元記事: https://errorlog.jp/posts/openai_api_422/
+:::
 
-## よくある原因
+## 冒頭まとめ
 
-**Fine-tuningのJSONLファイル形式が不正**
+OpenAI API の 422 には、他のコードと違う特殊な事情があります。**公式の API エラー一覧に、422 の項目がありません**。401、403、404、429、500、503 には説明がありますが、422 は載っていません。
 
-Fine-tuningに使用するJSONLファイルの各行が、OpenAIが定める正しい形式になっていない場合、422エラーが返されます。例えば、JSON形式で統一されていなかったり、不要なフィールドが含まれていたり、必須フィールドが欠けていたりすると、OpenAI側で処理できないと判断されるためです。
+定義があるのは、公式のソフトウェア開発キット側です。ライブラリのエラー区分の表に `UnprocessableEntityError` があり、説明は「形式は正しいにもかかわらず要求を処理できなかった」、対処は「もう一度試すこと」となっています。状態コードの対応表でも 422 はこの区分に割り当てられています。
 
-**messagesフォーマットが要件と異なる**
+つまり **422 は、API 側のエラーとしてではなく、クライアント側の受け取り方として定義されている**わけです。
 
-Fine-tuningのデータセットでは、各サンプルが`messages`配列を含む必要があります。その配列内のメッセージオブジェクトが`role`と`content`フィールドを持っていなかったり、`role`の値が不正な値（例：「user_message」など）だったりすると、422エラーが返されます。OpenAIは厳密なスキーマ検証を行うため、わずかな形式のズレでも拒否されるのです。
+これが実務で意味を持ちます。開発キットは、接続先が OpenAI 本体かどうかに関係なく、422 を受け取れば同じ例外を投げます。そして OpenAI 互換をうたうサーバーの多くは、入力の検証に失敗したとき 422 を返します。
 
-**データセット件数が最小要件を下回っている**
+**したがって、422 を見たときに最初に疑うべきは、自分の要求内容ではなく接続先です**。応答本文の形を見れば、どちらが返したかはすぐに分かります。
 
-Fine-tuningには最低限のサンプル数（通常は10件以上、推奨は50件以上）が必要です。これを満たさないデータセットをアップロードしようとすると、422エラーで拒否されます。
+## エラーの概要
 
-**JSONLファイルに無効なJSON行が含まれている**
+OpenAI 本体のエラー応答は、常にこの構造です。
 
-各行が有効なJSON形式になっていない場合、422エラーが返されます。例えば、シングルクォートの使用、末尾のカンマ、エスケープ漏れなども原因になります。
-
-## 解決手順
-
-**1. JSONLファイルの形式を確認する**
-
-Fine-tuningデータは、1行1個の有効なJSONオブジェクトからなるJSONL形式である必要があります。以下が正しいサンプルです。
-
-```jsonl
-{"messages": [{"role": "system", "content": "あなたは優秀なアシスタントです。"}, {"role": "user", "content": "こんにちは"}, {"role": "assistant", "content": "こんにちは。何かお手伝いできることはありますか？"}]}
-{"messages": [{"role": "system", "content": "あなたは優秀なアシスタントです。"}, {"role": "user", "content": "天気は？"}, {"role": "assistant", "content": "申し訳ございませんが、リアルタイムの天気情報は提供できません。"}]}
+```json
+{
+  "error": {
+    "message": "...",
+    "type": "invalid_request_error",
+    "param": "messages",
+    "code": "..."
+  }
+}
 ```
 
-ファイルの各行が独立した有効なJSONであることをテキストエディタで目視確認します。
+一方、422 を返す互換サーバーの多くは、次の構造を返します。
 
-**2. Pythonでファイルの検証を行う**
-
-以下のスクリプトで、JSONL形式とmessagesの構造を自動検証します。
-
-```python
-import json
-
-def validate_jsonl(file_path):
-    with open(file_path, 'r', encoding='utf-8') as f:
-        for line_num, line in enumerate(f, start=1):
-            try:
-                data = json.loads(line)
-                # messagesフィールドが存在するか確認
-                if 'messages' not in data:
-                    print(f"行 {line_num}: 'messages' フィールドが見つかりません")
-                    continue
-                # messagesは配列か確認
-                if not isinstance(data['messages'], list):
-                    print(f"行 {line_num}: 'messages' が配列ではありません")
-                    continue
-                # 各メッセージが role と content を持つか確認
-                for msg_num, msg in enumerate(data['messages']):
-                    if 'role' not in msg or 'content' not in msg:
-                        print(f"行 {line_num}、メッセージ {msg_num}: 'role' または 'content' が見つかりません")
-                    if msg.get('role') not in ['system', 'user', 'assistant']:
-                        print(f"行 {line_num}、メッセージ {msg_num}: roleが不正です（値：{msg.get('role')}）")
-            except json.JSONDecodeError as e:
-                print(f"行 {line_num}: JSON形式エラー - {e}")
-    print("検証完了")
-
-validate_jsonl('<your-file-path>.jsonl')
+```json
+{
+  "detail": [
+    {
+      "type": "string_type",
+      "loc": ["body", "input", "str"],
+      "msg": "Input should be a valid string",
+      "input": [[2149, 87515, 1764, 374]],
+      "url": "https://errors.pydantic.dev/2.5/v/string_type"
+    }
+  ]
+}
 ```
 
-**3. データセット件数を確認する**
+**`error` オブジェクトではなく `detail` 配列**です。項目の名前もまったく違います。これは、多くの互換サーバーが特定のフレームワークの上に作られており、その検証機構がこの形式でエラーを返すためです。末尾に検証ライブラリの説明への URL が入る点も特徴的です。
 
-以下のコマンドで行数（サンプル数）を確認します。
+紛らわしいのは、**どちらの場合も開発キットの例外名は同じ**になることです。`UnprocessableEntityError` という名前を見て「OpenAI が返した」と判断してはいけません。
+
+## まず最初に：接続先と本文の形を確認する
+
+第一に、応答本文が `error` か `detail` かを見ます。`detail` 配列であれば、OpenAI 本体ではありません。
+
+第二に、接続先の基点 URL を確認します。設定ファイルや環境変数で別のサーバーを指していないか。
+
+第三に、`detail` があれば、その中の `loc` を読みます。**どの項目が問題かが経路の形で示されます**。
+
+第四に、本体に対して 422 が返っている場合は、公式のライブラリの説明どおり、まず再試行します。
+
+## よくある原因と解決手順
+
+### 原因1：接続先が OpenAI 本体ではない
+
+最も多い形です。開発キットは接続先を差し替えられるため、同じコードのまま別のサーバーを呼んでいることがあります。
+
+該当しやすいのは、推論の提供元を切り替えた場合、手元で動かす推論サーバーを使っている場合、そして中継の仕組みを挟んでいる場合です。
 
 ```bash
-wc -l <your-file-path>.jsonl
+# 接続先を確認する
+python3 -c "
+from openai import OpenAI
+print(OpenAI().base_url)
+"
+
+# 環境変数で差し替えられていないか
+env | grep -iE 'OPENAI_BASE_URL|OPENAI_API_BASE'
 ```
 
-10件未満の場合は、トレーニングデータを追加してから再度アップロードします。
+出力が `https://api.openai.com/v1` でなければ、相手は OpenAI 本体ではありません。**そのサーバーの仕様に合わせる必要があり、OpenAI の文書を読んでも答えは出ません**。
 
-**4. OpenAI CLIを使用してアップロードする前に検証する**
+### 原因2：detail 配列を読んでいない
 
-OpenAIが提供する公式の検証ツールを使う場合、以下のようにします。
+互換サーバー由来だと分かったら、`detail` の中身が原因を示しています。読むべき項目は3つです。
+
+`loc` は問題のある位置を配列で示します。`["body", "input", "str"]` であれば、要求本文の `input` という項目が文字列であるべきだった、という意味です。`msg` は理由、`type` は検証の種別です。
 
 ```bash
-openai tools fine_tunes.prepare_data -f <your-file-path>.jsonl
+# detail の中身だけを取り出す
+curl -sS <接続先>/v1/embeddings \
+  -H "Content-Type: application/json" \
+  -d '{"model":"...","input":"test"}' \
+  | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+for x in d.get('detail', []):
+    print(' -> '.join(map(str, x.get('loc', []))), '|', x.get('msg'))
+"
 ```
 
-このコマンドを実行すると、形式エラーがあれば詳細に指摘されます。修正内容を確認し、再度実行します。
+**OpenAI 本体の `param` に相当するのが `loc`** だと考えれば、読み方は同じです。位置が分かれば、直す場所も決まります。
 
-**5. Fine-tuningジョブをアップロードする**
+### 原因3：「互換」は形式が同じであって仕様が同じではない
 
-検証を通過したら、OpenAI APIでFine-tuningジョブを作成します。
+見落とされやすい点です。互換をうたうサーバーは、要求の形式を合わせていますが、受け付ける値の範囲まで一致しているとは限りません。
+
+代表的なのが埋め込みの入力です。OpenAI 本体は文字列のほかにトークンの配列も受け付けますが、互換サーバーが文字列しか受け付けない場合、トークンの配列を渡した時点で検証に失敗します。
+
+**Before（本体向けの実装をそのまま向ける）：**
 
 ```python
+client = OpenAI(base_url="http://localhost:5001/v1", api_key="dummy")
+client.embeddings.create(model="...", input=[[2149, 87515, 1764]])  # トークン配列
+```
+
+**After（相手が受け付ける形に合わせる）：**
+
+```python
+client.embeddings.create(model="...", input="埋め込みたい文字列")
+```
+
+上位の枠組みを使っている場合、トークンの配列を送るかどうかは設定で変えられることがあります。**要求を組み立てているのが自分ではなく枠組みの側**である点に注意してください。
+
+### 原因4：OpenAI 本体から 422 が返った場合
+
+まれですが、この場合の対処は公式に示されています。ライブラリのエラー区分の説明は「形式は正しいのに処理できなかった」であり、対処は**もう一度試すこと**です。
+
+400 とは扱いが違います。400 は内容を直さなければ何度送っても同じですが、422 の説明には再試行が明記されています。開発キットの自動再試行の対象には含まれていないため、必要なら自分で1回試すことになります。
+
+続く場合は、要求の識別子を控えて問い合わせてください。
+
+### 原因5：例外名で発生源を判断している
+
+対処ではなく、切り分けの問題です。`UnprocessableEntityError` は開発キットが状態コードから機械的に決めた名前であり、**誰が返したかの情報を含みません**。
+
+同様に、`openai` という名前が付いた例外が出たからといって、OpenAI と通信しているとは限りません。多くの道具が、互換エンドポイントに対して同じ開発キットを使っています。
+
+判断材料は例外名ではなく、応答本文の形と接続先の URL です。
+
+## 補足：似ているが別のもの
+
+OpenAI 本体で入力の検証に失敗した場合は 400 です。`param` に問題の項目、`code` に種別が入ります（[OpenAI API の 400 の記事](https://errorlog.jp/posts/openai_api_400/)）。**本体で内容の問題なら 400、422 ではない**、と押さえておくと切り分けが速くなります。
+
+経路そのものが存在しない場合は 404 です。互換サーバーでは、対応していないエンドポイントを呼ぶとこちらになります（[OpenAI API の 404 の記事](https://errorlog.jp/posts/openai_api_404/)）。
+
+認証の失敗は 401 です。互換サーバーでは鍵の検証をしていないことも多く、適当な値でも通る場合があります（[OpenAI API の 401 の記事](https://errorlog.jp/posts/openai_api_401/)）。
+
+Azure 経由の場合も、エラーの形式や検証の仕組みが別系統です。本記事の内容がそのまま当てはまるとは限りません。
+
+## 切り分けの順序
+
+1. 応答本文が `error` か `detail` かを見る。`detail` なら OpenAI 本体ではない。
+2. 接続先の基点 URL を確認する。差し替えられていないか。
+3. 互換サーバーなら、`loc` を読んで問題の項目を特定する。
+4. そのサーバーが受け付ける値の範囲を確認する。形式が同じでも仕様は違う。
+5. 要求を組み立てているのが自分か枠組みかを確認する。
+6. 本体から返っている場合は、まず1回再試行する。
+7. 例外名で発生源を判断しない。名前は状態コードから機械的に決まる。
+8. 内容の問題で本体から返るのは 400。422 なら前提を疑う。
+
+## 確認コマンド集
+
+```bash
+# 1. 接続先を確認する（最重要）
+python3 -c "
+from openai import OpenAI
+c = OpenAI()
+print('base_url:', c.base_url)
+"
+
+# 2. 環境変数で差し替えられていないかを確認する
+env | grep -iE 'OPENAI_BASE_URL|OPENAI_API_BASE|OPENAI_API_TYPE'
+
+# 3. 応答本文の形を確認する（error か detail か）
+curl -sS <接続先>/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $OPENAI_API_KEY" \
+  -d '{"model":"<モデル>","messages":[{"role":"user","content":"hi"}]}' | head -c 300
+
+# 4. detail の中身を読みやすく取り出す
+curl -sS <接続先>/v1/embeddings \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $OPENAI_API_KEY" \
+  -d '{"model":"<モデル>","input":"test"}' \
+  | python3 -c "
+import json,sys
+d = json.load(sys.stdin)
+if 'detail' in d:
+    for x in d['detail']:
+        print('loc:', ' -> '.join(map(str, x.get('loc', []))))
+        print('msg:', x.get('msg'), '| type:', x.get('type'))
+else:
+    print('error オブジェクト形式:', d.get('error'))
+"
+
+# 5. 例外の中身をそのまま確認する
+python3 -c "
+from openai import OpenAI
 import openai
-
-openai.api_key = '<your-api-key>'
-
-with open('<your-file-path>.jsonl', 'rb') as f:
-    response = openai.File.create(file=f, purpose='fine-tune')
-    file_id = response['id']
-
-job = openai.FineTune.create(training_file=file_id, model='gpt-3.5-turbo')
-print(job['id'])
+try:
+    OpenAI().embeddings.create(model='text-embedding-3-small', input='test')
+except openai.APIStatusError as e:
+    print(type(e).__name__, e.status_code)
+    print(e.body)
+"
 ```
 
-## それでも解決しない場合
+## Editor's Note
 
-OpenAIの公式ドキュメント（https://platform.openai.com/docs/guides/fine-tuning）で最新のスキーマ要件を確認してください。APIアップデートにより仕様が変わっている可能性があります。また、OpenAI APIサポートフォーラムでエラーメッセージの全文を含めて質問することで、より具体的な原因を特定できます。
+例外の名前が、発生源を誤解させることがあります。それを示す記録があります（[Openai API - OpenAIEmbeddings: UnprocessableEntityError](https://github.com/oobabooga/text-generation-webui/discussions/4876)）。
+
+2023年12月、ある利用者が埋め込みの取得で `UnprocessableEntityError` に遭遇しました。例外の名前には `openai` が付いています。しかし、貼られている内容を読むと事情が違いました。
+
+まず接続先です。要求先は `http://localhost:5001/v1/embeddings`、つまり**手元で動かしている推論サーバー**でした。次に応答本文です。`error` オブジェクトではなく `detail` 配列で、各要素に `type`、`loc`、`msg`、そして検証ライブラリの説明ページへの URL が入っています。
+
+内容も具体的でした。`loc` は要求本文の `input` を指し、`msg` は文字列であるべきだと述べています。そして `input` の値として記録されているのは、数値の配列——トークンに変換済みの入力でした。上位の枠組みが OpenAI 本体向けにトークンの配列を送っていたのに対し、手元のサーバーは文字列しか受け付けなかったわけです。
+
+ここに、このエラーの構造が凝縮されています。**例外の名前は開発キットが付けたもの、エラーの中身は相手のサーバーが作ったもの**。この2つの出どころが違うことを知らないと、OpenAI の文書を延々と読むことになります。
+
+422 を受け取ったら、まず接続先を確認してください。`error` か `detail` か。その1点で、読むべき文書がどこにあるかが決まります。
 
 ---
 
