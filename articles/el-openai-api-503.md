@@ -3,236 +3,202 @@ title: "OpenAI API の 503 エラー：原因と解決策"
 emoji: "🚫"
 type: "tech"
 topics: ["openai-api", "error"]
-published: false
+published: true
 ---
+
+:::message
+本記事は技術エラー解説サイト [errorlog.jp](https://errorlog.jp/) からの転載です。最新の内容と関連エラーの一覧は元記事を参照してください。
+元記事: https://errorlog.jp/posts/openai_api_503/
+:::
+
+## 冒頭まとめ
+
+OpenAI API の 503 は、公式のエラー一覧で**混雑**として定義されています。文言は現在処理系が過負荷なので後で試すよう促す趣旨で、原因はサーバー側が大量の通信を受けていること、対処は短い待機のうえでの再試行、と明記されています。
+
+つまり、**送った内容にも、自分の設定にも問題はありません**。全利用者に対して起きている状態です。
+
+ただし、ここに落とし穴があります。**同じ「過負荷」の文言は 429 でも返ります**。公式の説明資料には、この文言が 429 の項目としても掲載されています。文言だけを読んで「混雑だから待とう」と判断すると、実際には自分の上限に達していた、という取り違えが起こります。
+
+この2つは対処が違います。503 は待てば通ります。429 は、レート制限なら待って通り、クォータ不足なら**待っても永久に通りません**。
+
+したがって、文言ではなく**状態コードを見る**のが出発点になります。
 
 ## エラーの概要
 
-OpenAI APIにおいて503エラーは「Service Unavailable」を意味し、OpenAIのサーバーが一時的に利用不可能な状態であることを示します。このエラーが発生すると、テキスト生成やチャット補完などのAPI呼び出しが失敗し、アプリケーションは応答を受け取ることができません。503は通常、サーバー側の問題であり、クライアント設定の誤りではないため、適切な対応戦略が必要です。
-
-## 実際のエラーメッセージ例
+応答は次の形です。
 
 ```json
 {
   "error": {
-    "message": "The server is overloaded or not ready yet.",
+    "message": "The engine is currently overloaded, please try again later",
     "type": "server_error",
     "param": null,
-    "code": "server_error"
+    "code": null
   }
 }
 ```
 
-```python
-openai.error.ServiceUnavailableError: The server had an error while processing your request. Sorry about that! (HTTP status 503)
-```
+`param` も `code` も `null` です。500 と同じ構造で、**指し示せる場所が無い**ことを示しています。
+
+公式のソフトウェア開発キットでは、状態コードが 500 以上のものがまとめて1つの区分になります。したがって、**開発キットの例外の型だけでは 500 と 503 を区別できません**。状態コードを取り出して確認する必要があります。
+
+再試行については、開発キットが接続の問題、408、409、429、そして 500 番台を**既定で2回自動的に再試行**します。503 もこの対象です。手元の記録に1回しか出ていなくても、実際は3回試したうえで諦めた状態です。
+
+## まず最初に：状態コードで 429 と分ける
+
+第一に、状態コードを確認します。文言が「過負荷」でも、503 と 429 では意味が違います。
+
+第二に、429 だった場合は `type` を読みます。`rate_limit_exceeded` なら待てば通り、`insufficient_quota` なら待っても通りません（[OpenAI API の 429 の記事](https://errorlog.jp/posts/openai_api_429/)）。
+
+第三に、503 だった場合は、開発キットの再試行が既に効いていることを踏まえて回数を確定させます。
+
+第四に、稼働状況を確認します。広範囲であれば、こちらでできることはありません。
 
 ## よくある原因と解決手順
 
-### 原因1: OpenAIサーバーの過負荷状態
+### 原因1：提供側が混雑している
 
-**なぜ発生するか**
-OpenAIのAPI全体が高トラフィック状態にある場合、サーバーがリクエスト処理を受け付けられなくなります。特に新機能リリース直後やトレンドワード関連のタイミングで発生しやすい状況です。
+定義どおりの形です。対処は待つことですが、待ち方に工夫が要ります。
 
-**Before（待機なしの実装）**
-```python
-import openai
-
-response = openai.ChatCompletion.create(
-    model="gpt-4",
-    messages=[{"role": "user", "content": "Hello"}]
-)
-```
-
-**After（指数バックオフ対応）**
-```python
-import openai
-import time
-import random
-
-def call_openai_with_retry(messages, model="gpt-4", max_retries=5):
-    for attempt in range(max_retries):
-        try:
-            response = openai.ChatCompletion.create(
-                model=model,
-                messages=messages
-            )
-            return response
-        except openai.error.ServiceUnavailableError:
-            if attempt == max_retries - 1:
-                raise
-            wait_time = 2 ** attempt + random.uniform(0, 1)
-            print(f"503エラー。{wait_time:.1f}秒後に再試行します（試行 {attempt + 1}/{max_retries}）")
-            time.sleep(wait_time)
-```
-
-### 原因2: OpenAI側のメンテナンス実施中
-
-**なぜ発生するか**
-OpenAIは定期的にサービスメンテナンスを実施します。メンテナンス期間中はAPIが利用不可となり、全リクエストが503を返します。事前公知がない緊急メンテナンスの場合もあります。
-
-**Before（メンテナンス確認なし）**
-```javascript
-const response = await fetch('https://api.openai.com/v1/chat/completions', {
-  method: 'POST',
-  headers: {
-    'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
-    'Content-Type': 'application/json'
-  },
-  body: JSON.stringify({
-    model: 'gpt-4',
-    messages: [{ role: 'user', content: 'Hello' }]
-  })
-});
-```
-
-**After（メンテナンス状態確認）**
-```javascript
-// 1. OpenAI Status ページを確認
-const statusCheckUrl = 'https://status.openai.com/api/v2/status.json';
-
-async function checkOpenAIStatus() {
-  const status = await fetch(statusCheckUrl).then(r => r.json());
-  return status.status.indicator; // "none" = 正常, "minor" = 軽微な問題, "major" = メジャー問題
-}
-
-async function callOpenAIWithStatusCheck(messages) {
-  const statusIndicator = await checkOpenAIStatus();
-  
-  if (statusIndicator !== 'none') {
-    console.log(`OpenAI ステータス: ${statusIndicator}。メンテナンス中の可能性があります。`);
-    return null;
-  }
-  
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      model: 'gpt-4',
-      messages: messages
-    })
-  });
-  
-  return await response.json();
-}
-```
-
-### 原因3: リージョン固有のサービス障害
-
-**なぜ発生するか**
-OpenAIは複数のエンドポイントやリージョンを運用していますが、特定リージョンで障害が発生すると、そのエリアからのリクエストが503を返すことがあります。ルーティングの設定やVPN経由でのアクセスが影響する場合もあります。
-
-**Before（単一エンドポイント）**
-```yaml
-# config.yaml
-openai:
-  api_key: sk-xxxx
-  api_base: https://api.openai.com/v1  # デフォルトエンドポイント固定
-```
-
-**After（フォールバック設定）**
-```python
-import openai
-import os
-
-# プライマリエンドポイント
-primary_endpoint = "https://api.openai.com/v1"
-# Azure OpenAI のバックアップ（企業環境の場合）
-backup_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
-
-def call_openai_with_fallback(messages, model="gpt-4"):
-    endpoints = [primary_endpoint]
-    
-    if backup_endpoint:
-        endpoints.append(backup_endpoint)
-    
-    for endpoint in endpoints:
-        try:
-            openai.api_base = endpoint
-            response = openai.ChatCompletion.create(
-                model=model,
-                messages=messages,
-                timeout=30
-            )
-            print(f"成功: {endpoint}")
-            return response
-        except openai.error.ServiceUnavailableError:
-            print(f"失敗: {endpoint}。次を試行します...")
-            continue
-    
-    raise Exception("全エンドポイントが利用不可です")
-```
-
-## ツール固有の注意点
-
-### APIレート制限との違い
-
-OpenAI APIは429（Too Many Requests）と503を区別します。503は**サーバー側の問題**であり、429は**利用者のレート制限超過**です。`Retry-After`ヘッダーの有無で判定できます：
+**Before（一定の間隔で叩き続ける）：**
 
 ```python
-import requests
-
-try:
-    response = requests.post(
-        'https://api.openai.com/v1/chat/completions',
-        headers={'Authorization': f'Bearer {api_key}'},
-        json={'model': 'gpt-4', 'messages': [{'role': 'user', 'content': 'Hi'}]},
-        timeout=30
-    )
-    response.raise_for_status()
-except requests.exceptions.HTTPError as e:
-    if e.response.status_code == 503:
-        retry_after = e.response.headers.get('Retry-After')
-        print(f"サーバー側の障害。{retry_after}秒後に再試行推奨")
-    elif e.response.status_code == 429:
-        retry_after = e.response.headers.get('Retry-After')
-        print(f"レート制限に達しました。{retry_after}秒待機してください")
+for i in range(10):
+    try:
+        return client.chat.completions.create(...)
+    except openai.InternalServerError:
+        time.sleep(1)      # 混雑時に等間隔で送り続ける
 ```
 
-### 本番環境での503対応ベストプラクティス
+**After（間隔を伸ばし、ばらつきを持たせる）：**
 
-- **サーキットブレーカーパターンの導入**: 一定回数の503エラーが連続したら、一時的にAPI呼び出しを停止し、キューイングシステムに切り替える
-- **構造化ロギング**: 503発生時刻、リトライ回数、最終的な成功/失敗を記録し、パターン分析に活用する
-- **ユーザーへの通知**: 503が継続する場合、フロントエンドに明示的なエラーメッセージを表示し、待機を求める
+```python
+client = OpenAI(max_retries=5)   # 開発キットに任せる（指数的な間隔）
+resp = client.chat.completions.create(...)
+```
 
-## それでも解決しない場合
+混雑している相手に等間隔で送り続けると、回復した瞬間に全利用者の再試行が重なります。間隔を指数的に伸ばし、わずかな揺らぎを加えるのが定石です。開発キットはこの動作を内蔵しています。
 
-### 確認すべきログとデバッグ手順
+### 原因2：状態コードを見ずに 429 と混同している
+
+冒頭で述べた取り違えです。文言が同じでも、状態コードが 429 なら自分側の上限の話です。
 
 ```bash
-# 1. OpenAI Status ページで障害情報を確認
-# https://status.openai.com/
-
-# 2. API Key の有効性確認（curl を使用）
-curl https://api.openai.com/v1/models \
-  -H "Authorization: Bearer sk-<your-api-key>"
-
-# 3. ネットワークレイテンシの測定
-ping api.openai.com
-# または
-curl -w "Time: %{time_total}s\n" -o /dev/null -s https://api.openai.com/v1/models
-
-# 4. VPN/プロキシ経由の場合は一度外して試行
+# 文言ではなく状態コードと type を確認する
+curl -sS -D - -o body.json https://api.openai.com/v1/chat/completions \
+  -H "Authorization: Bearer $OPENAI_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}' \
+  | grep -i "^HTTP/"
+python3 -c "import json; e=json.load(open('body.json')).get('error',{}); print(e.get('type'), e.get('code'))"
 ```
 
-### 公式ドキュメント参照
+429 側であれば、残量を示すヘッダーも付きます。503 には付きません。**ヘッダーの有無も判別材料**になります。
 
-- **OpenAI API トラブルシューティングガイド**: https://platform.openai.com/docs/guides/error-handling
-- **HTTP ステータスコード仕様**: https://platform.openai.com/docs/guides/error-handling/api-errors
-- **OpenAI Status ページ**: https://status.openai.com/
+### 原因3：大きな要求を並列で流している
 
-### コミュニティリソース
+混雑は提供側の状態ですが、送り方によって当たりやすさは変わります。長い入力や大きな出力の指定は、1件あたりの負荷を押し上げます。
 
-OpenAIの非公式コミュニティや GitHub Issues では、同じ問題を抱えたユーザーの解決記録が蓄積されています。以下をチェックして下さい：
+減らす方向は2つです。1回あたりの大きさを抑えることと、同時に流す本数を抑えることです。
 
-- **GitHub Discussions**: https://github.com/openai/openai-python/discussions（Python SDK ユーザー）
-- **OpenAI Community Forum**: https://community.openai.com/
-- **Stack Overflow**: タグ `openai-api` で検索
+```python
+# 出力の上限を用途に合わせる（大きすぎる指定は避ける）
+client.chat.completions.create(model="gpt-4o-mini",
+    messages=[...], max_tokens=256)
+```
 
-また、問題が持続する場合は、OpenAIの公式サポート（https://help.openai.com/）に具体的なリクエストID（エラーレスポンスに含まれる`id`フィールド）を添えて報告してください。
+なお、即時の応答が必要ない処理であれば、まとめて実行する仕組みに移すという選択肢もあります。同期の経路とは別枠で扱われます。
+
+### 原因4：再試行が二重になっている
+
+開発キットが既定で2回再試行することを知らずに、自作の再試行を重ねる形です。待ち時間も送信回数も掛け算になります。
+
+混雑時にこれをやると、状況を悪化させます。**まず何回送られているかを確定**してから、設計してください。
+
+```python
+# 素の応答と回数を確定させる
+client = OpenAI(max_retries=0)
+```
+
+### 原因5：待っても直らない
+
+長時間続く場合は、混雑ではない可能性があります。状態コードをもう一度確認してください。
+
+`insufficient_quota` の 429 であれば、待っても永久に直りません。残高や請求の設定を確認する必要があります。500 であれば、続く場合は問い合わせが案内されています。502 であれば、そもそも API の層に届いていません。
+
+**「待てば直る」は 503 に固有の性質**であって、5 で始まるコードすべてに当てはまるわけではありません。
+
+## 補足：似ているが別のもの
+
+サーバー側の処理で問題が起きた場合は 500 です。公式の対処は短い待機のうえでの再試行と、続く場合の問い合わせです（[OpenAI API の 500 の記事](https://errorlog.jp/posts/openai_api_500/)）。503 との違いは、原因が容量にあると明示されているかどうかです。
+
+応答が JSON でなく HTML であれば 502 で、返したのは API の層ではありません（[OpenAI API の 502 の記事](https://errorlog.jp/posts/openai_api_502/)）。
+
+上限や残高の問題は 429 です。前述のとおり、文言が同じ場合があるため、状態コードで見分けてください。
+
+他の基盤でも、503 は「一時的であり再試行で解消しうる」という位置づけが共通しています（[GCP の 503 の記事](https://errorlog.jp/posts/gcp_503/)）。
+
+## 切り分けの順序
+
+1. 状態コードを確認する。文言が「過負荷」でも 429 のことがある。
+2. 429 なら `type` を読む。クォータ不足は待っても直らない。
+3. 残量のヘッダーが付いているかを見る。429 の側には付く。
+4. 503 なら、開発キットの再試行が既に効いている前提で回数を確定する。
+5. 間隔は指数的に伸ばし、ばらつきを加える。等間隔で叩かない。
+6. 1件あたりの大きさと同時実行数を見直す。
+7. 即時性が不要なら、まとめて実行する仕組みへ移す。
+8. 長時間続くなら、混雑以外の可能性を疑い、状態コードを再確認する。
+
+## 確認コマンド集
+
+```bash
+# 1. 状態コードだけを確認する（文言に頼らない）
+curl -sS -o /dev/null -w "%{http_code}\n" https://api.openai.com/v1/chat/completions \
+  -H "Authorization: Bearer $OPENAI_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}'
+
+# 2. 残量ヘッダーの有無を見る（429 との判別）
+curl -sS -D - -o /dev/null https://api.openai.com/v1/chat/completions \
+  -H "Authorization: Bearer $OPENAI_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}' \
+  | grep -iE 'x-ratelimit|retry-after|x-request-id'
+
+# 3. 発生率を測る（混雑の程度を把握する）
+for i in $(seq 20); do
+  curl -sS -o /dev/null -w "%{http_code}\n" https://api.openai.com/v1/chat/completions \
+    -H "Authorization: Bearer $OPENAI_API_KEY" \
+    -H "Content-Type: application/json" \
+    -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}'
+  sleep 1
+done | sort | uniq -c
+
+# 4. 開発キットの再試行を止めて素の応答を見る
+python3 -c "
+from openai import OpenAI
+import openai
+try:
+    OpenAI(max_retries=0).chat.completions.create(
+        model='gpt-4o-mini', messages=[{'role':'user','content':'hi'}])
+except openai.APIStatusError as e:
+    print(e.status_code, e.request_id); print(e.body)
+"
+```
+
+## Editor's Note
+
+503 は、**個々の利用者にできることがほとんど無い**エラーです。だからこそ、対処は「直す」ではなく「織り込む」方向になります。
+
+それを実装として示した記録があります（[[ML] Add retry logic for 500 and 503 errors for OpenAI](https://github.com/elastic/elasticsearch/pull/103819)）。2024年1月、ある検索基盤の機械学習機能に、OpenAI API からの 500 と 503 に対する再試行が追加されました。理由は、クラウド上での検証で**断続的な 500 と 503 の失敗**が観測され、大量の取り込み処理が丸ごと失敗していたためです。
+
+注目すべきは、500 と 503 が**同じ変更でまとめて扱われた**ことです。実装から見れば、どちらも「相手側の事情で失敗した、再試行の価値がある応答」という同じ分類に入ります。公式の開発キットが 500 番台をまとめて既定で再試行するのも同じ考え方です。
+
+一方、利用者の側から見ると、この2つには重要な違いがあります。503 は原因が**容量**だと明示されており、待てば通る見込みがあります。500 にはその見込みが書かれておらず、続く場合は問い合わせが案内されています。
+
+そして最も注意すべきは、**同じ「過負荷」の文言が 429 でも使われている**ことです。文言を見て「混雑だから待とう」と判断したとき、実際に見ているのが 429 なら、待っても状況は変わらないかもしれません。クォータ不足であれば、待つことは何の解決にもなりません。
+
+503 に当たったら、まず状態コードを確認する。それから、再試行を自分で足すのか、既に足りているのかを確定させる。順序はこの2つです。
 
 ---
 
