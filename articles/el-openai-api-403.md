@@ -3,227 +3,185 @@ title: "OpenAI API の 403 エラー：原因と解決策"
 emoji: "🚫"
 type: "tech"
 topics: ["openai-api", "error"]
-published: false
+published: true
 ---
+
+:::message
+本記事は技術エラー解説サイト [errorlog.jp](https://errorlog.jp/) からの転載です。最新の内容と関連エラーの一覧は元記事を参照してください。
+元記事: https://errorlog.jp/posts/openai_api_403/
+:::
+
+## 冒頭まとめ
+
+OpenAI API の 403 は、公式のエラー一覧では**1項目しか定義されていません**。国・地域・領域が対応外である、というものです。
+
+このエラーには、他と違う特徴があります。応答の `type` が `invalid_request_error` ではなく **`request_forbidden`** になります。`code` は `unsupported_country_region_territory` です。この2語が見えた時点で、系統が確定します。
+
+そして最も重要な点です。**判定されているのは利用者の所在地ではなく、要求の送信元 IP アドレスがどこと判定されたか**です。対応国にいても、経路の途中で別の地域と判定されれば 403 になります。実際、提供元の窓口も利用者に対し、IP アドレスを教えてほしい、正しくない地域に判定されていないか確認する、と応じています。
+
+もう1つ、プログラムから呼んだ場合の 403 として、資源へのアクセス権が無い場合があります。公式のソフトウェア開発キットでは、要求した資源へのアクセス権が無い状態として定義され、正しいキー・組織 ID・資源 ID を使っているか確認するよう案内されています。
+
+逆に、**403 だと思われがちだが違うもの**があります。残高や利用額の上限は 429、モデルへのアクセス権は 404、キーの失効や組織の不一致は 401 です。いずれも 403 では返りません。
 
 ## エラーの概要
 
-OpenAI APIの403エラーは、認証には成功しましたが、そのAPIキーに対してリクエストされたモデルやエンドポイントへのアクセス権限がない場合に発生します。認可エラーと呼ばれ、認証エラー（401）とは異なります。このエラーが表示される場合、APIキーの有効性は確認されていますが、使用しようとしている機能や言語モデルに対する利用権がアカウントレベルで制限されているか、または支払い情報に問題がある可能性があります。
-
-## 実際のエラーメッセージ例
+地域の非対応は、次の形で返ります。
 
 ```json
 {
   "error": {
-    "message": "You exceeded your current quota, please check your plan and billing settings.",
-    "type": "server_error",
+    "code": "unsupported_country_region_territory",
+    "message": "Country, region, or territory not supported",
     "param": null,
-    "code": "insufficient_quota"
+    "type": "request_forbidden"
   }
 }
 ```
 
-```json
-{
-  "error": {
-    "message": "You do not have access to the model gpt-4.",
-    "type": "invalid_request_error",
-    "param": "model",
-    "code": "model_not_found"
-  }
-}
-```
+他のエラーと並べると違いが際立ちます。400 や 401 の `type` は `invalid_request_error` ですが、こちらは `request_forbidden` です。**`type` を見るだけで、内容の問題でも認証の問題でもないと分かります**。
+
+もう1つ確認すべきことがあります。**応答が JSON かどうか**です。上の形が返っていれば、API の層が判断した結果です。JSON ではなく HTML の遮断画面が返っている場合、判断したのは API の層ではなく、その手前にある仕組みです。調べる先が変わるため、本文の形式を最初に確認してください。
+
+## まず最初に：type と送信元 IP を確認する
+
+第一に、`type` を読みます。`request_forbidden` であれば地域の系統です。
+
+第二に、応答が JSON かどうかを見ます。HTML であれば、API より手前の層で遮断されています。
+
+第三に、**要求が実際にどの IP から出ているか**を確認します。手元の所在地ではなく、プログラムが動いている環境の外向き IP です。
+
+第四に、その IP がどの地域と判定されるかを確認します。ここが自分の認識とずれていれば、原因はそこです。
 
 ## よくある原因と解決手順
 
-### 原因1：月間利用額の上限に達している
+### 原因1：送信元 IP が対応外の地域と判定されている
 
-OpenAI APIアカウントに設定された月間支出上限に達すると、すべてのAPI呼び出しが403エラーで拒否されます。特に、無料トライアル期間が終了した直後や、不正な使用検出後のアカウント凍結時に発生しやすい現象です。
+最も多い形です。特徴的なのは、**手元では通るのに配備先で失敗する**という現れ方をすることです。キーも要求の内容も同じなので、原因の特定が遅れます。
 
-**Before（エラーが起きる設定）：**
-```python
-import openai
-
-openai.api_key = "<your-api-key>"
-response = openai.ChatCompletion.create(
-    model="gpt-3.5-turbo",
-    messages=[{"role": "user", "content": "Hello"}]
-)
-```
-
-このコードを実行すると、支出上限に達していれば403エラーが返されます。
-
-**After（修正後）：**
-OpenAI Dashboard（https://platform.openai.com/account/billing/overview）にアクセスし、以下の確認と設定を行います。
-
-1. **Usage（利用状況）** タブで現在の月間費用を確認
-2. **Billing settings** で月間上限を引き上げるか無制限に設定
-3. **Payment methods** で有効なクレジットカード情報が登録されているか確認
+疑うべきなのは、要求が自分の手を離れてから外へ出るまでの経路です。クラウド上の実行環境、中継のプロキシ、配信網の実行環境、社内から外部へ出る回線。**このどれかの出口 IP が判定の対象になります**。
 
 ```bash
-# 設定後、APIの動作確認
-curl https://api.openai.com/v1/models \
-  -H "Authorization: Bearer <your-api-key>"
+# プログラムが動く環境の外向き IP を確認する
+curl -sS https://api.ipify.org
+
+# その環境から最小の要求を投げ、type を確認する
+curl -sS https://api.openai.com/v1/models \
+  -H "Authorization: Bearer $OPENAI_API_KEY" \
+  | python3 -c "import json,sys; e=json.load(sys.stdin).get('error',{}); print(e.get('type'), '|', e.get('code'))"
 ```
 
-### 原因2：アカウントがGPT-4へのアクセス権を持っていない
+対応地域で運用しているつもりでも、経路の途中で別の地域を通っていれば判定はそちらに従います。まず経路を把握することが先決です。
 
-GPT-4、GPT-4 Turbo、GPT-4 Visionなどの高度なモデルは、すべてのOpenAIアカウントで即座に利用できません。特定の契約条件や使用実績が必要な場合があります。
+### 原因2：地理判定そのものが誤っている
 
-**Before（エラーが起きるコード）：**
-```python
-import openai
+対応国から呼んでいるのに 403 が返る場合です。**利用者側の設定ではなく、IP アドレスの地域判定が実態と合っていない**ことがあります。
 
-openai.api_key = "<your-api-key>"
-response = openai.ChatCompletion.create(
-    model="gpt-4",
-    messages=[{"role": "user", "content": "Explain quantum computing"}]
-)
-# 結果：403 エラー - "You do not have access to the model gpt-4."
+新しく割り当てられたアドレス帯や、クラウド事業者が特定の地域で使い始めた範囲では、判定に使われる情報が追いついていない場合があります。
+
+この場合、プログラム側をいくら直しても解決しません。取れる手段は2つです。
+
+```bash
+# 1. 別の実行環境（別リージョンなど）から到達するかを確認する
+#    通るなら、元の環境の出口 IP に問題が絞られる
+
+# 2. 出口 IP を控えて、提供元の窓口に確認を依頼する
+curl -sS https://api.ipify.org
 ```
 
-**After（修正後）：**
-利用可能なモデルを事前に確認し、アクセス権のあるモデルを使用します。
+後述の実例でも、提供元の窓口が利用者に IP アドレスの共有を求め、最終的に提供元側で修正されています。**利用者側で対処しきれない種類がある**と知っておくと、無駄な試行錯誤を避けられます。
 
-```python
+### 原因3：資源へのアクセス権が無い
+
+開発キットの区分で `PermissionDeniedError` として現れる場合です。公式の説明は、要求した資源へのアクセス権が無い、というもので、対処として正しいキー・組織 ID・資源 ID を使っているかの確認が挙げられています。
+
+地域の系統と違い、`type` は `request_forbidden` にはなりません。**資源を特定する識別子が要求に含まれている場合**（アシスタント、ファイル、微調整済みモデルなど）に起こります。
+
+その資源が、いま使っているキーの属するプロジェクトのものかを確認してください。組織やプロジェクトをまたいで識別子を使い回すと、この形になります。
+
+### 原因4：403 ではないものを 403 として調べている
+
+下記はいずれも 403 ではありません。**この4つを 403 の原因として探すと、必ず行き止まりになります**。
+
+残高が尽きた、あるいは支出や利用額の上限に達した場合は **429** です。公式のエラー一覧では、残高切れ、組織の支出上限、プロジェクトの支出上限、承認された利用上限が、それぞれ独立した識別子として 429 の側に定義されています。
+
+指定したモデルが存在しない、またはアクセス権が無い場合は **404** で、`code` は `model_not_found` です。
+
+キーが失効している、組織やプロジェクトと一致しない、エンドポイントに必要な権限が無い場合は **401** です（[OpenAI API の 401 の記事](https://errorlog.jp/posts/openai_api_401/)）。IP の許可リストとの不一致も、地域の判定とは別に 401 の側で定義されています。
+
+送った内容そのものに問題がある場合は **400** です。
+
+### 原因5：応答が API の層から来ていない
+
+`type` も `code` も無く、HTML の遮断画面が返っている場合です。この場合、API の層には到達していません。
+
+判断したのは、経路上の防御の仕組みです。表示される内容と識別子は、その仕組みが定義したものであり、本記事の内容は当てはまりません。**まず「誰が返したか」を確定させてから調べる先を決める**、という順序は他のエラーと同じです。
+
+## 補足：似ているが別のもの
+
+認証の失敗は 401 です。公式では 401 の原因が4種類に整理されており、そのうちの1つが IP の許可リストとの不一致です。**同じ IP に関する話でも、許可リストは 401、地域の判定は 403**、と分かれています。
+
+上限や請求に関するエラーは 429 です。公式には、請求関連では `error.code` を見て具体的な原因を特定するよう書かれています。
+
+他の基盤では、403 が担う範囲がまったく違います。GCP では権限の不足が 403 の中心で、応答に不足している権限の名前が入ります（[GCP の 403 の記事](https://errorlog.jp/posts/gcp_403/)）。Azure でも同様に権限やネットワークの制御が中心です（[Azure の 403 の記事](https://errorlog.jp/posts/azure_403/)）。**OpenAI API の 403 を他の基盤の感覚で読むと、原因を取り違えます**。
+
+## 切り分けの順序
+
+1. `type` を読む。`request_forbidden` なら地域の系統。
+2. 応答が JSON かを確認する。HTML なら API の層に届いていない。
+3. `code` が `unsupported_country_region_territory` かを確認する。
+4. プログラムが動く環境の外向き IP を確認する。手元の所在地ではない。
+5. 別の実行環境から到達するかを試す。通るなら出口 IP に原因が絞られる。
+6. 対応地域から呼んでいるのに失敗するなら、判定の誤りを疑い、IP を控えて窓口に確認を依頼する。
+7. 資源の識別子を含む要求なら、その資源が現在のプロジェクトのものかを確認する。
+8. 残高・モデル・キーの話であれば、そもそも 403 ではない。429・404・401 を見る。
+
+## 確認コマンド集
+
+```bash
+# 1. 状態コードと本文の形式を同時に確認する（JSON か HTML か）
+curl -sS -i https://api.openai.com/v1/models \
+  -H "Authorization: Bearer $OPENAI_API_KEY" | head -20
+
+# 2. type と code だけを取り出す
+curl -sS https://api.openai.com/v1/models \
+  -H "Authorization: Bearer $OPENAI_API_KEY" \
+  | python3 -c "import json,sys; e=json.load(sys.stdin).get('error',{}); print(e.get('type'), '|', e.get('code'))"
+
+# 3. 実行環境の外向き IP を確認する
+curl -sS https://api.ipify.org; echo
+
+# 4. コンテナや実行環境の中から確認する（配備先で実行）
+docker run --rm curlimages/curl -sS https://api.ipify.org; echo
+
+# 5. 経路を確認する（中継が挟まっていないか）
+env | grep -iE 'http_proxy|https_proxy|no_proxy'
+
+# 6. 開発キットの例外種別を確認する
+python3 -c "
+from openai import OpenAI
 import openai
-
-openai.api_key = "<your-api-key>"
-
-# 利用可能なモデル一覧を取得
-models = openai.Model.list()
-available_models = [m.id for m in models.data]
-print("Available models:", available_models)
-
-# GPT-4へのアクセス権がない場合はGPT-3.5-turboを使用
-model_to_use = "gpt-4" if "gpt-4" in available_models else "gpt-3.5-turbo"
-
-response = openai.ChatCompletion.create(
-    model=model_to_use,
-    messages=[{"role": "user", "content": "Explain quantum computing"}]
-)
-```
-
-GPT-4のアクセス権を取得するには、https://openai.com/waitlist/gpt-4-api からウェイトリストに登録するか、既存のOpenAIユーザーであれば利用実績を積み重ねることで自動的にアクセス権が付与される場合があります。
-
-### 原因3：APIキーが無効化または削除されている
-
-APIキーが手動で削除されたり、セキュリティ侵害により無効化されたりした場合、そのキーでのリクエストはすべて403で拒否されます。複数のキーを使用している場合は、複雑な設定エラーと誤認されることもあります。
-
-**Before（エラーが起きる状況）：**
-```python
-import openai
-
-# 既に削除されたAPIキーを使用している
-openai.api_key = "sk-xxxxxxx-deleted-key-xxxxxxx"
-response = openai.ChatCompletion.create(
-    model="gpt-3.5-turbo",
-    messages=[{"role": "user", "content": "Hello"}]
-)
-# 結果：403 エラー
-```
-
-**After（修正後）：**
-OpenAI Dashboard の API keys ページで新しいキーを生成し、使用します。
-
-```python
-import openai
-import os
-
-# 環境変数から新しいAPIキーを読み込む
-openai.api_key = os.getenv("OPENAI_API_KEY")
-
-# キーが有効であることを確認するため、簡単なリクエストを送信
 try:
-    response = openai.ChatCompletion.create(
-        model="gpt-3.5-turbo",
-        messages=[{"role": "user", "content": "ping"}]
-    )
-    print("API key is valid")
-except openai.error.AuthenticationError:
-    print("Invalid or expired API key")
-except openai.error.PermissionError:
-    print("Permission denied - check account status and quota")
+    OpenAI().models.list()
+except openai.PermissionDeniedError as e:
+    print('PermissionDenied:', e.status_code, e.body)
+except openai.AuthenticationError as e:
+    print('Authentication:', e.status_code, e.body)
+"
 ```
 
-新しいAPIキーを生成した後、環境変数を設定します。
+## Editor's Note
 
-```bash
-# .env ファイルに記述
-OPENAI_API_KEY="sk-<your-new-api-key>"
+このエラーの判定が「利用者の国」ではなく「送信元 IP の判定結果」であることを、当事者のやり取りごと記録した相談があります（[Cloud Run in asia-northeast3 Suddenly Getting 'unsupported_country_region_territory' Error](https://community.openai.com/t/cloud-run-in-asia-northeast3-suddenly-getting-unsupported-country-region-territory-error-from-openai-api/1279969)）。
 
-# 環境変数として設定（Linux/Mac）
-export OPENAI_API_KEY="sk-<your-new-api-key>"
+2025年6月、韓国の実行環境に配備していたサービスが、突然 403 を返し始めました。相談者はこう書いています。**コードも配備の設定も変えていない**。キーは有効で、上限にも達していない。そして「この地域は対応しているはずだ」と。
 
-# PowerShell（Windows）
-$env:OPENAI_API_KEY="sk-<your-new-api-key>"
-```
+同じ症状の報告が次々と続きます。同じクラウドの同じ地域を使う利用者が、数日のうちに4人以上集まりました。
 
-## OpenAI API固有の注意点
+3日後、提供元の窓口が返答します。**韓国は対応国である**と認めたうえで、使用している IP アドレスを共有してほしい、**誤って対象外の地域に判定されていないか確認する**、という内容でした。この一文が、判定の実体を明かしています。見られているのは所在地の申告ではなく、通信の出どころです。
 
-### 無料トライアル期間の終了による制限
+ある利用者は待ちきれず、実行環境の地域を別の場所へ変えることで解決しています。**設定を1つも直さず、出口を変えただけ**です。そして6日後、窓口から修正済みの連絡があり、報告者たちの環境は元のまま復旧しました。
 
-OpenAIの無料トライアルは3ヶ月間に限定されており、期間終了後は有効なクレジットカードの登録が必須です。登録されていない場合、すべてのAPI呼び出しが403で拒否されます。
-
-```bash
-# 請求情報の確認用APIエンドポイント
-curl https://api.openai.com/v1/dashboard/billing/credit_grants \
-  -H "Authorization: Bearer <your-api-key>"
-```
-
-### 組織（Organization）レベルの権限設定
-
-複数のプロジェクトがある場合、OpenAIの Organization 機能を使用します。このとき、個別のAPIキーが特定の Organization に紐付けられていなければ403エラーが発生します。
-
-```python
-import openai
-
-openai.api_key = "<your-api-key>"
-openai.organization = "<your-organization-id>"  # 組織IDを明示的に指定
-
-response = openai.ChatCompletion.create(
-    model="gpt-3.5-turbo",
-    messages=[{"role": "user", "content": "Hello"}]
-)
-```
-
-### レート制限（Rate Limit）との区別
-
-403エラーは永続的な権限不足を示しますが、429ステータスコードはレート制限による一時的な制限です。403が返された場合は、429と異なり単なる時間経過では解決しません。
-
-## それでも解決しない場合
-
-### デバッグ情報の収集
-
-```python
-import openai
-import logging
-
-# OpenAIライブラリのデバッグログを有効化
-logging.basicConfig(level=logging.DEBUG)
-
-openai.api_key = "<your-api-key>"
-
-# リクエスト送信時に詳細なエラー情報を取得
-try:
-    response = openai.ChatCompletion.create(
-        model="gpt-3.5-turbo",
-        messages=[{"role": "user", "content": "Hello"}]
-    )
-except openai.error.OpenAIError as e:
-    print(f"Error type: {type(e)}")
-    print(f"Error message: {str(e)}")
-    print(f"HTTP status: {e.http_status}")
-```
-
-### 公式リソースへのアクセス
-
-- **API Status ページ**（https://status.openai.com）：API全体の障害情報を確認
-- **API ドキュメント**（https://platform.openai.com/docs/api-reference）：最新のエンドポイント仕様確認
-- **GitHub Issues**（https://github.com/openai/openai-python/issues）：同様の問題報告を検索
-- **サポートフォーム**（https://help.openai.com）：アカウント固有の問題は公式サポートに問い合わせ
-
-アカウントの制限解除やGPT-4へのアクセス権追加については、OpenAIの公式サポートへの問い合わせが最も確実な解決方法です。
+この記録から得られる教訓は2つあります。1つは、403 に当たったとき最初に確認すべきなのが、プログラムではなく**要求がどこから出ているか**だということ。もう1つは、**利用者側では直しようがない場合がある**ということです。手を尽くしても変わらないなら、出口の IP を控えて提供元に伝えるのが、最短の道になります。
 
 ---
 
