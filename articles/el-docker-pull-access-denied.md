@@ -167,7 +167,7 @@ Composeの環境変数展開後に、`image:` が空、古い名前、別Registr
 
 ## よくある原因と解決手順
 
-### 原因1：名前空間を省略し、Docker Hubのlibraryを見ている
+### 原因1：名前空間を省略し、Docker Hubのlibraryを見ている {#docker-hub-library-namespace}
 
 自分のリポジトリを短い名前だけで指定すると、Docker Hub上の自分のアカウント名は補完されません。
 
@@ -197,7 +197,7 @@ services:
 
 `docker login` は名前を修正する処理ではありません。`library/my-app` が存在しないなら、Docker Hubへログインしても要求先は変わりません。
 
-### 原因2：リポジトリ名、所有者名、Registryが違う
+### 原因2：リポジトリ名、所有者名、Registryが違う {#repository-not-found}
 
 次の違いはすべて別の取得先です。
 
@@ -212,7 +212,7 @@ registry.example.com/example/my-app
 
 Docker Hubのリポジトリ名は作成後に変更できません。[Docker Hubの作成資料](https://docs.docker.com/docker-hub/repos/create/)にも、既存リポジトリはrenameできないと記載されています。名称を変えた運用では、通常は新しいリポジトリを作り、イメージを新しい参照へ公開します。古い名前が自動転送されるとは考えないでください。
 
-### 原因3：非公開リポジトリへ未認証でアクセスしている
+### 原因3：非公開リポジトリへ未認証でアクセスしている {#authentication}
 
 対象が非公開なら、まずそのRegistryへ認証します。
 
@@ -256,7 +256,7 @@ printf '%s' "$REGISTRY_TOKEN" |
 
 トークン本体、`~/.docker/config.json`、資格情報保存先の内容をログへ出さないでください。
 
-### 原因4：ログインには成功したが、pull権限がない
+### 原因4：ログインには成功したが、pull権限がない {#pull-permission}
 
 `Login Succeeded` は、資格情報が認証サービスに受け入れられたことを示します。任意の非公開リポジトリをpullできるという意味ではありません。
 
@@ -276,7 +276,7 @@ denied: requested access to the resource is denied
 
 パスワードを何度作り直しても、対象リポジトリの許可は増えません。Registry管理者またはリポジトリ所有者側で、正しい主体へreadまたはpull権限を付けます。
 
-### 原因5：タグを省略し、存在しないlatestを要求している
+### 原因5：タグを省略し、存在しないlatestを要求している {#missing-latest-tag}
 
 タグを省略したときに使われる `latest` は、最新時刻のイメージを自動で探す機能ではありません。`latest` という名前のタグです。
 
@@ -300,7 +300,7 @@ manifest for example/my-app:latest not found: manifest unknown
 
 非公開リポジトリで権限もタグも不足している場合は、権限の検査が先です。`pull access denied` を直した後に `manifest unknown` が現れることがあります。これは原因が変わったのではなく、次の検査段階まで進んだ結果です。
 
-### 原因6：CIだけ別の認証設定を使っている
+### 原因6：CIだけ別の認証設定を使っている {#ci-auth-config}
 
 手元で `docker login` しても、その資格情報は自動でCIへ渡りません。Dockerは通常、実行した利用者の設定または資格情報保存先を使います。Linuxでは `$HOME/.docker/config.json`、Windowsでは `%USERPROFILE%/.docker/config.json` が標準の設定場所です。
 
@@ -320,7 +320,7 @@ docker pull registry.example.com/team/app:1.2
 
 `sudo docker pull` と通常の `docker login` を組み合わせると、資格情報を読む利用者が分かれる場合があります。権限回避のためだけに `sudo` を追加せず、ログインとpullを同じ実行環境へそろえます。
 
-### 原因7：Dockerfileのstage名を間違え、外部イメージとしてpullしている
+### 原因7：Dockerfileのstage名を間違え、外部イメージとしてpullしている {#copy-from-stage-name}
 
 `COPY --from` の値は、以前のbuild stage、名前付きcontext、または外部イメージを指せます。[Dockerfileの公式仕様](https://docs.docker.com/reference/dockerfile#copy---from)にあるとおり、stage名として見つからなければ、イメージ参照として解決される構成があります。
 
@@ -351,7 +351,7 @@ COPY --from=builder /out/app /app
 
 この場合、Registryへのログインは不要です。誤って外部イメージ扱いされた文字列を直します。
 
-### 原因8：ローカルだけにあるイメージを、別のbuilderがpullしようとしている
+### 原因8：ローカルだけにあるイメージを、別のbuilderがpullしようとしている {#buildkit-local-image}
 
 Dockerfileに次の指定があるとします。
 
@@ -379,7 +379,7 @@ docker buildx build .
 
 `--load` は、buildの**結果**をローカルのimage storeへ読み込む指定です。別のbuilderへ既存の基礎イメージを渡す指定ではないため、入力側の `pull access denied` を直す目的では使いません。
 
-### 原因9：Composeのimageとbuildの関係が想定と違う
+### 原因9：Composeのimageとbuildの関係が想定と違う {#compose-image-build}
 
 Composeに `image:` だけがあれば、ローカルに見つからない場合はRegistryから取得します。
 
